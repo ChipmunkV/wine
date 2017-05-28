@@ -2112,6 +2112,17 @@ static void dump_unmap_view_request( const struct unmap_view_request *req )
     dump_uint64( " base=", &req->base );
 }
 
+static void dump_get_mapping_file_request( const struct get_mapping_file_request *req )
+{
+    fprintf( stderr, " process=%04x", req->process );
+    dump_uint64( ", addr=", &req->addr );
+}
+
+static void dump_get_mapping_file_reply( const struct get_mapping_file_reply *req )
+{
+    fprintf( stderr, " handle=%04x", req->handle );
+}
+
 static void dump_get_mapping_committed_range_request( const struct get_mapping_committed_range_request *req )
 {
     dump_uint64( " base=", &req->base );
@@ -4449,6 +4460,7 @@ static const dump_func req_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_mapping_info_request,
     (dump_func)dump_map_view_request,
     (dump_func)dump_unmap_view_request,
+    (dump_func)dump_get_mapping_file_request,
     (dump_func)dump_get_mapping_committed_range_request,
     (dump_func)dump_add_mapping_committed_range_request,
     (dump_func)dump_is_same_mapping_request,
@@ -4726,6 +4738,7 @@ static const dump_func reply_dumpers[REQ_NB_REQUESTS] = {
     (dump_func)dump_get_mapping_info_reply,
     NULL,
     NULL,
+    (dump_func)dump_get_mapping_file_reply,
     (dump_func)dump_get_mapping_committed_range_reply,
     NULL,
     NULL,
@@ -5003,6 +5016,7 @@ static const char * const req_names[REQ_NB_REQUESTS] = {
     "get_mapping_info",
     "map_view",
     "unmap_view",
+    "get_mapping_file",
     "get_mapping_committed_range",
     "add_mapping_committed_range",
     "is_same_mapping",

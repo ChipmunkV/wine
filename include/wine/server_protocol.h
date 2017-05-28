@@ -1922,6 +1922,21 @@ struct unmap_view_reply
 
 
 
+struct get_mapping_file_request
+{
+    struct request_header __header;
+    obj_handle_t process;
+    client_ptr_t addr;
+};
+struct get_mapping_file_reply
+{
+    struct reply_header __header;
+    obj_handle_t handle;
+    char __pad_12[4];
+};
+
+
+
 struct get_mapping_committed_range_request
 {
     struct request_header __header;
@@ -5417,6 +5432,7 @@ enum request
     REQ_get_mapping_info,
     REQ_map_view,
     REQ_unmap_view,
+    REQ_get_mapping_file,
     REQ_get_mapping_committed_range,
     REQ_add_mapping_committed_range,
     REQ_is_same_mapping,
@@ -5698,6 +5714,7 @@ union generic_request
     struct get_mapping_info_request get_mapping_info_request;
     struct map_view_request map_view_request;
     struct unmap_view_request unmap_view_request;
+    struct get_mapping_file_request get_mapping_file_request;
     struct get_mapping_committed_range_request get_mapping_committed_range_request;
     struct add_mapping_committed_range_request add_mapping_committed_range_request;
     struct is_same_mapping_request is_same_mapping_request;
@@ -5977,6 +5994,7 @@ union generic_reply
     struct get_mapping_info_reply get_mapping_info_reply;
     struct map_view_reply map_view_reply;
     struct unmap_view_reply unmap_view_reply;
+    struct get_mapping_file_reply get_mapping_file_reply;
     struct get_mapping_committed_range_reply get_mapping_committed_range_reply;
     struct add_mapping_committed_range_reply add_mapping_committed_range_reply;
     struct is_same_mapping_reply is_same_mapping_reply;

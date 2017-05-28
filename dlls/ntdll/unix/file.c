@@ -1771,7 +1771,7 @@ static NTSTATUS fill_file_info( const struct stat *st, ULONG attr, void *ptr,
 }
 
 
-static NTSTATUS server_get_unix_name( HANDLE handle, char **unix_name )
+NTSTATUS server_get_unix_name( HANDLE handle, char **unix_name )
 {
     data_size_t size = 1024;
     NTSTATUS ret;

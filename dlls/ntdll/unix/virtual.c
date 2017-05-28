@@ -3845,6 +3845,125 @@ static NTSTATUS get_working_set_ex( HANDLE process, LPCVOID addr,
     return STATUS_SUCCESS;
 }
 
+/***********************************************************************
+ *           get_nt_pathname
+ *
+ * Simplified version of RtlDosPathNameToNtPathName_U.
+ */
+static BOOL get_nt_pathname( const UNICODE_STRING *str, WCHAR *buffer, SIZE_T *size )
+{
+    static const WCHAR ntprefixW[] = {'\\','?','?','\\',0};
+    static const WCHAR uncprefixW[] = {'U','N','C','\\',0};
+    const WCHAR *name = str->Buffer;
+    WCHAR *ret;
+
+	*size = str->Length + 8 * sizeof(WCHAR);
+
+    wcscpy( buffer, ntprefixW );
+    if (name[0] == '\\' && name[1] == '\\')
+    {
+        if ((name[2] == '.' || name[2] == '?') && name[3] == '\\') name += 4;
+        else
+        {
+            wcscat( buffer, uncprefixW );
+            name += 2;
+        }
+    }
+    wcscat( buffer, name );
+    return TRUE;
+}
+
+/* get file name for mapped section */
+static NTSTATUS get_section_name( HANDLE process, LPCVOID addr,
+                                  MEMORY_SECTION_NAME *info,
+                                  SIZE_T len, SIZE_T *res_len )
+{
+    UNICODE_STRING nt_name;
+    ANSI_STRING unix_name;
+    data_size_t size = 1024;
+    WCHAR *name = NULL;
+    NTSTATUS status;
+    HANDLE mapping;
+
+    if (!addr || !info || !res_len) return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( get_mapping_file )
+    {
+        req->process = wine_server_obj_handle( process );
+        req->addr = wine_server_client_ptr( addr );
+        status = wine_server_call( req );
+        mapping = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+
+    nt_name.Buffer = NULL;
+
+    if (!status && mapping)
+    {
+        status = server_get_unix_name( mapping, &unix_name );
+        NtClose( mapping );
+        if (!status)
+        {
+             if (!(nt_name.Buffer = malloc( (strlen(&unix_name) + 1) * sizeof(WCHAR) + 8 )))
+                return STATUS_NO_MEMORY;
+
+            status = wine_unix_to_nt_file_name( &unix_name, nt_name.Buffer, &nt_name.Length );
+            free( &unix_name );
+        }
+        if (!status) goto found;
+        if (status == STATUS_OBJECT_TYPE_MISMATCH) status = STATUS_FILE_INVALID;
+        return status;
+    }
+
+    for (;;)
+    {
+        if (!(name = malloc( (size + 1) * sizeof(WCHAR) )))
+            return STATUS_NO_MEMORY;
+
+        SERVER_START_REQ( get_dll_info )
+        {
+            req->handle = wine_server_obj_handle( process );
+            req->base_address = (ULONG_PTR)addr;
+            wine_server_set_reply( req, name, size * sizeof(WCHAR) );
+            status = wine_server_call( req );
+            size = reply->filename_len / sizeof(WCHAR);
+        }
+        SERVER_END_REQ;
+
+        if (!status)
+        {
+            name[size] = 0;
+            break;
+        }
+        free( name );
+        if (status == STATUS_DLL_NOT_FOUND) return STATUS_INVALID_ADDRESS;
+        if (status != STATUS_BUFFER_TOO_SMALL) return status;
+    }
+
+    if (!get_nt_pathname( name, nt_name.Buffer, &nt_name.Length ))
+    {
+        free( name );
+        return STATUS_INVALID_PARAMETER;
+    }
+
+found:
+    *res_len = sizeof(MEMORY_SECTION_NAME) + nt_name.Length + sizeof(WCHAR);
+    if (len >= *res_len)
+    {
+        info->SectionFileName.Length = nt_name.Length;
+        info->SectionFileName.MaximumLength = nt_name.Length + sizeof(WCHAR);
+        info->SectionFileName.Buffer = (WCHAR *)(info + 1);
+        memcpy(info->SectionFileName.Buffer, nt_name.Buffer, nt_name.Length);
+        info->SectionFileName.Buffer[ nt_name.Length / sizeof(WCHAR) ] = 0;
+    }
+    else
+        status = (len < sizeof(MEMORY_SECTION_NAME)) ? STATUS_INFO_LENGTH_MISMATCH : STATUS_BUFFER_OVERFLOW;
+
+    free( name );
+    free( nt_name.Buffer );
+    return status;
+}
+
 #define UNIMPLEMENTED_INFO_CLASS(c) \
     case c: \
         FIXME("(process=%p,addr=%p) Unimplemented information class: " #c "\n", process, addr); \
@@ -3869,8 +3988,10 @@ NTSTATUS WINAPI NtQueryVirtualMemory( HANDLE process, LPCVOID addr,
         case MemoryWorkingSetExInformation:
             return get_working_set_ex( process, addr, buffer, len, res_len );
 
+        case MemorySectionName:
+            return get_section_name( process, addr, buffer, len, res_len );
+
         UNIMPLEMENTED_INFO_CLASS(MemoryWorkingSetList);
-        UNIMPLEMENTED_INFO_CLASS(MemorySectionName);
         UNIMPLEMENTED_INFO_CLASS(MemoryBasicVlmInformation);
 
         default:
