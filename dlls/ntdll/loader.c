@@ -1719,6 +1719,12 @@ NTSTATUS WINAPI LdrGetProcedureAddress(HMODULE module, const ANSI_STRING *name,
     DWORD exp_size;
     NTSTATUS ret = STATUS_PROCEDURE_NOT_FOUND;
 
+    if(name && (!strcmp(name->Buffer, "wine_nt_to_unix_file_name") || !strcmp(name->Buffer, "wine_get_unix_file_name")))
+    {
+        FIXME("skipping %s\n", name->Buffer);
+        return ret;
+    }
+
     RtlEnterCriticalSection( &loader_section );
 
     /* check if the module itself is invalid to return the proper error */
