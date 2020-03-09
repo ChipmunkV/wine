@@ -439,6 +439,9 @@ static BOOL get_event(IMFMediaEventGenerator *generator, MediaEventType expected
     return TRUE;
 }
 
+static IMFSample *retrieved_h264_samples[60];
+static IMFMediaType *compressed_h264_type;
+
 static void test_source_resolver(void)
 {
     struct test_callback callback = { { &test_create_from_url_callback_vtbl } };
@@ -462,6 +465,7 @@ static void test_source_resolver(void)
     PROPVARIANT var;
     HRESULT hr;
     GUID guid;
+    UINT64 frame_size, frame_rate;
 
     if (!pMFCreateSourceResolver)
     {
@@ -595,12 +599,26 @@ static void test_source_resolver(void)
     ok(hr == S_OK, "Failed to get current media type, hr %#x.\n", hr);
     hr = IMFMediaType_GetGUID(media_type, &MF_MT_SUBTYPE, &guid);
     ok(hr == S_OK, "Failed to get media sub type, hr %#x.\n", hr);
-todo_wine
-    ok(IsEqualGUID(&guid, &MFVideoFormat_M4S2), "Unexpected sub type %s.\n", debugstr_guid(&guid));
-    IMFMediaType_Release(media_type);
+    ok(IsEqualGUID(&guid, &MFVideoFormat_H264), "Unexpected sub type %s.\n", debugstr_guid(&guid));
+
+    hr = IMFMediaType_GetUINT64(media_type, &MF_MT_FRAME_SIZE, &frame_size);
+    ok(hr == S_OK, "Failed to get frame size, hr %#x.\n", hr);
+
+    ok((frame_size >> 32) == 320, "Unexpected width %u.\n", (DWORD)(frame_size >> 32));
+    ok((frame_size & 0xffffffff) == 240, "Unexpected height %u.\n", (DWORD)(frame_size & 0xffffffff));
+
+    hr = IMFMediaType_GetUINT64(media_type, &MF_MT_FRAME_RATE, &frame_rate);
+    ok(hr == S_OK, "Failed to get frame rate, hr %#x.\n", hr);
+
+    ok((frame_rate >> 32) / (frame_rate & 0xffffffff) == 30, "Unexpected framerate %u/%u\n",
+        (DWORD)(frame_rate >> 32), (DWORD)(frame_rate & 0xffffffff));
 
     hr = IMFPresentationDescriptor_SelectStream(descriptor, 0);
     ok(hr == S_OK, "Failed to select video stream, hr %#x.\n", hr);
+
+    compressed_h264_type = media_type;
+    IMFMediaTypeHandler_Release(handler);
+    IMFStreamDescriptor_Release(sd);
 
     var.vt = VT_EMPTY;
     hr = IMFMediaSource_Start(mediasource, descriptor, &GUID_NULL, &var);
@@ -612,9 +630,9 @@ todo_wine
 
     get_event((IMFMediaEventGenerator *)mediasource, MESourceStarted, NULL);
 
-    /* Request samples, our file is 10 frames at 25fps */
+    /* Request samples, our file is 60 frames at 30fps */
     get_event((IMFMediaEventGenerator *)video_stream, MEStreamStarted, NULL);
-    sample_count = 10;
+    sample_count = 60;
 
     for (i = 0; i < sample_count; ++i)
     {
@@ -629,9 +647,14 @@ todo_wine
     for (i = 0; i < sample_count; ++i)
     {
         static const LONGLONG MILLI_TO_100_NANO = 10000;
-        LONGLONG duration, time;
+        static int once = 0;
+        LONGLONG duration;
         DWORD buffer_count;
         IMFSample *sample;
+        IMFMediaBuffer *buffer;
+        BYTE *buffer_data;
+        DWORD buffer_len;
+        BYTE nal_type = 0x00;
         BOOL ret;
 
         ret = get_event((IMFMediaEventGenerator *)video_stream, MEMediaSample, &var);
@@ -642,19 +665,38 @@ todo_wine
         ok(var.vt == VT_UNKNOWN, "Unexpected value type %u from MEMediaSample event.\n", var.vt);
         sample = (IMFSample *)var.punkVal;
 
-        hr = IMFSample_GetBufferCount(sample, &buffer_count);
-        ok(hr == S_OK, "Failed to get buffer count, hr %#x.\n", hr);
-        ok(buffer_count == 1, "Unexpected buffer count %u.\n", buffer_count);
-
         hr = IMFSample_GetSampleDuration(sample, &duration);
         ok(hr == S_OK, "Failed to get sample duration, hr %#x.\n", hr);
-        ok(duration == 40 * MILLI_TO_100_NANO, "Unexpected duration %s.\n", wine_dbgstr_longlong(duration));
+        ok(duration > 33 * MILLI_TO_100_NANO && duration < 34 *MILLI_TO_100_NANO,
+            "Unexpected duration %lu.\n", duration);
 
-        hr = IMFSample_GetSampleTime(sample, &time);
-        ok(hr == S_OK, "Failed to get sample time, hr %#x.\n", hr);
-        ok(time == i * 40 * MILLI_TO_100_NANO, "Unexpected time %s.\n", wine_dbgstr_longlong(time));
+        hr = IMFSample_GetBufferCount(sample, &buffer_count);
+        ok(hr == S_OK, "Failed to get buffer count, hr %#x.\n", hr);
+        ok(buffer_count > 0, "Unexpected buffer count %u.\n", buffer_count);
 
-        IMFSample_Release(sample);
+        hr = IMFSample_GetBufferByIndex(sample, 0, &buffer);
+        ok (hr == S_OK, "Failed to get buffer from sample, hr %#x.\n", hr);
+        hr = IMFMediaBuffer_Lock(buffer, &buffer_data, NULL, &buffer_len);
+        ok (hr == S_OK, "Failed to lock buffer, hr %#x.\n", hr);
+        ok (buffer_len >= 4, "Size of first sample buffer < 4 bytes %u\n", buffer_len);
+        for (unsigned int k = 0; k < 5; k++)
+        {
+            ok (buffer_data[k] == 0x00 || buffer_data[k] == 0x01, "Invalid start prefix\n");
+            if (buffer_data[k] == 0x01)
+            {
+                nal_type = buffer_data[k+1];
+                break;
+            }
+        }
+        if (!once)
+            todo_wine ok(nal_type != 0x09, "Access Unit Delimeter NAL not expected.\n");
+        if (nal_type == 0x09)
+            once = 1;
+        hr = IMFMediaBuffer_Unlock(buffer);
+        ok (hr == S_OK, "Failed to unlock buffer.\n");
+        IMFMediaBuffer_Release(buffer);
+
+        retrieved_h264_samples[i] = sample;
     }
 
     if (i == sample_count)
@@ -722,6 +764,178 @@ todo_wine
     ok(hr == S_OK, "Failed to shut down, hr %#x.\n", hr);
 
     DeleteFileW(filename);
+}
+
+static void test_decoder(void)
+{
+    IMFTransform *decoder;
+    DWORD in_min, in_max, out_min, out_max;
+    IMFMediaType *output_type = NULL;
+    MFT_INPUT_STREAM_INFO input_stream_info;
+    MFT_OUTPUT_STREAM_INFO output_stream_info;
+    DWORD input_counter, output_counter;
+    UINT64 frame_size, frame_rate;
+    LONGLONG last_sample_time = 0;
+    HRESULT hr;
+
+    if (FAILED(CoCreateInstance(&CLSID_CMSH264DecoderMFT, NULL, CLSCTX_INPROC_SERVER, &IID_IMFTransform, (void**)&decoder)))
+    {
+        skip("Skipping decoder tests.\n");
+        return;
+    }
+
+    hr = IMFTransform_GetStreamLimits(decoder, &in_min, &in_max, &out_min, &out_max);
+    ok (hr == S_OK, "Failed to get stream limits, hr %#x\n", hr);
+    ok (in_min == 1 && in_max == 1 && out_min == 1 && out_max == 1, "Unexpected stream limits.\n");
+
+    hr = IMFTransform_GetStreamCount(decoder, &in_min, &out_min);
+    ok (hr == S_OK, "hr %#x\n", hr);
+
+    for (unsigned int i = 0;;i++)
+    {
+        IMFMediaType *available_input_type = NULL;
+        GUID subtype;
+
+        if (FAILED(hr = IMFTransform_GetInputAvailableType(decoder, 0, i, &available_input_type)))
+            break;
+
+        if (FAILED(hr = IMFMediaType_GetGUID(available_input_type, &MF_MT_SUBTYPE, &subtype)))
+        {
+            IMFMediaType_Release(available_input_type);
+            break;
+        }
+
+        if (IsEqualGUID(&subtype, &MFVideoFormat_H264))
+        {
+            IMFMediaType_Release(available_input_type);
+            break;
+        }
+
+        IMFMediaType_Release(available_input_type);
+    }
+    ok (hr == S_OK, "Didn't find MFVideoFormat_H264 as an input type.\n");
+
+    hr = IMFTransform_SetInputType(decoder, 0, compressed_h264_type, 0);
+    ok (hr == S_OK, "Failed to set input type, hr %#x.\n", hr);
+
+    for (unsigned int i = 0;;i++)
+    {
+        IMFMediaType *available_output_type;
+        GUID subtype;
+
+        if (FAILED(hr = IMFTransform_GetOutputAvailableType(decoder, 0, i, &available_output_type)))
+            break;
+
+        if (FAILED(hr = IMFMediaType_GetGUID(available_output_type, &MF_MT_SUBTYPE, &subtype)))
+        {
+            IMFMediaType_Release(available_output_type);
+            break;
+        }
+
+        if (IsEqualGUID(&subtype, &MFVideoFormat_NV12))
+        {
+            output_type = available_output_type;
+            break;
+        }
+
+        IMFMediaType_Release(available_output_type);
+    }
+    ok (hr == S_OK, "Didn't find MFVideoFormat_NV12 as an output type, hr %#x\n", hr);
+
+    hr = IMFMediaType_GetUINT64(output_type, &MF_MT_FRAME_SIZE, &frame_size);
+    ok (hr == S_OK, "Failed to get output frame size, hr %#x.\n", hr);
+
+    ok(frame_size >> 32 == 320, "Unexpected width %u.\n", (DWORD)(frame_size >> 32));
+    ok((frame_size & 0xffffffff) == 240, "Unexpected height %u.\n", (DWORD)(frame_size & 0xffffffff));
+
+    hr = IMFMediaType_GetUINT64(output_type, &MF_MT_FRAME_RATE, &frame_rate);
+    ok (hr == S_OK, "Failed to get output frame rate, hr %#x.\n", hr);
+
+    ok((frame_rate >> 32) / (frame_rate & 0xffffffff) == 30, "Unexpected framerate %u/%u\n",
+        (DWORD)(frame_rate >> 32), (DWORD)(frame_rate & 0xffffffff));
+
+    hr = IMFTransform_SetOutputType(decoder, 0, output_type, 0);
+    ok (hr == S_OK, "Failed to set output type, hr %#x.\n", hr);
+
+    hr = IMFTransform_GetInputStreamInfo(decoder, 0, &input_stream_info);
+    ok (hr == S_OK, "hr %#x.\n");
+
+    hr = IMFTransform_GetOutputStreamInfo(decoder, 0, &output_stream_info);
+    ok (hr == S_OK, "hr = %#x.\n");
+
+    input_counter = 0;
+    output_counter = 0;
+
+    hr = IMFTransform_ProcessMessage(decoder, MFT_MESSAGE_NOTIFY_BEGIN_STREAMING, 0);
+    ok (hr == S_OK, "hr %#x\n");
+
+    while (output_counter < 60 && input_counter < 60)
+    {
+        while (input_counter < 60)
+        {
+            IMFSample *sample = retrieved_h264_samples[input_counter];
+            DWORD output_status;
+
+            hr = IMFTransform_ProcessInput(decoder, 0, sample, 0);
+            ok (hr == S_OK || hr == MF_E_NOTACCEPTING, "Failed to input sample %u, hr %#x.\n", input_counter, hr);
+            if (hr == MF_E_NOTACCEPTING)
+                break;
+            input_counter++;
+            hr = IMFTransform_GetOutputStatus(decoder, &output_status);
+            ok(hr == S_OK, "hr %#x\n", hr);
+            if (output_status & MFT_OUTPUT_STATUS_SAMPLE_READY)
+                break;
+        }
+        if (input_counter == 60)
+        {
+            hr = IMFTransform_ProcessMessage(decoder, MFT_MESSAGE_COMMAND_DRAIN, 0);
+            ok (hr == S_OK, "hr %#x\n", hr);
+        }
+        while (output_counter < 60)
+        {
+            DWORD output_status = 0;
+            MFT_OUTPUT_DATA_BUFFER out_buffers[1];
+            LONGLONG sample_time;
+
+            out_buffers[0].dwStreamID = 0;
+            out_buffers[0].pSample = 0;
+            out_buffers[0].dwStatus = 0;
+            out_buffers[0].pEvents = NULL;
+
+            if (!(output_stream_info.dwFlags & MFT_OUTPUT_STREAM_PROVIDES_SAMPLES))
+            {
+                IMFMediaBuffer *buffer;
+                IMFSample *sample;
+                hr = MFCreateMemoryBuffer(output_stream_info.cbSize, &buffer);
+                ok(hr == S_OK, "hr %#x\n");
+                hr = MFCreateSample(&sample);
+                ok(hr == S_OK, "hr %#x\n");
+                hr = IMFSample_AddBuffer(sample, buffer);
+                ok(hr == S_OK, "hr %#x\n");
+                out_buffers[0].pSample = sample;
+            }
+
+            hr = IMFTransform_ProcessOutput(decoder, 0, 1, out_buffers, &output_status);
+            ok (out_buffers[0].pEvents == NULL, "Unexpected events.\n");
+            ok (hr == S_OK || hr == MF_E_TRANSFORM_NEED_MORE_INPUT, "Failed to process output, sample %u, hr %#x.\n", output_counter, hr);
+            if (hr == MF_E_TRANSFORM_NEED_MORE_INPUT) break;
+            ok (out_buffers[0].dwStatus == S_OK, "hr %#x\n", out_buffers[0].dwStatus);
+            hr = IMFSample_GetSampleTime(out_buffers[0].pSample, &sample_time);
+            ok (hr == S_OK, "hr %#x\n", hr);
+            if (last_sample_time)
+            {
+                ok ((sample_time - last_sample_time - 333333) < 10, "Unexpected sample time progression (%lu)->(%lu)\n", last_sample_time, sample_time);
+            }
+            last_sample_time = sample_time;
+            IMFSample_Release(out_buffers[0].pSample);
+            output_counter++;
+        }
+    }
+    ok (output_counter == 60, "Expected 60 output samples, got %u\n", output_counter);
+
+    IMFMediaType_Release(output_type);
+    IMFMediaType_Release(compressed_h264_type);
+    IMFTransform_Release(decoder);
 }
 
 static void init_functions(void)
@@ -6009,6 +6223,7 @@ START_TEST(mfplat)
     test_MFCreateMFByteStreamOnStream();
     test_system_memory_buffer();
     test_source_resolver();
+    test_decoder();
     test_MFCreateAsyncResult();
     test_allocate_queue();
     test_MFCopyImage();
