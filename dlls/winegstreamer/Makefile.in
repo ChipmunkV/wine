@@ -13,6 +13,7 @@ C_SRCS = \
 	main.c \
 	media_source.c \
 	mediatype.c \
+	mf_decode.c \
 	mfplat.c \
 	pin.c \
 	qualitycontrol.c \

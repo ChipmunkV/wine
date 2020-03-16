@@ -51,6 +51,8 @@ static void CALLBACK perform_cb(TP_CALLBACK_INSTANCE *instance, void *user)
         perform_cb_gstdemux(cbdata);
     else if (cbdata->type < MEDIA_SOURCE_MAX)
         perform_cb_media_source(cbdata);
+    else if (cbdata->type < MF_DECODE_MAX)
+        perform_cb_mf_decode(cbdata);
 
     pthread_mutex_lock(&cbdata->lock);
     cbdata->finished = 1;
@@ -403,4 +405,67 @@ void mf_src_no_more_pads_wrapper(GstElement *element, gpointer user)
     cbdata.u.no_more_pads_data.user = user;
 
     call_cb(&cbdata);
+}
+
+gboolean activate_push_mode_wrapper(GstPad *pad, GstObject *parent, GstPadMode mode, gboolean activate)
+{
+    struct cb_data cbdata = { ACTIVATE_PUSH_MODE };
+
+    cbdata.u.activate_mode_data.pad = pad;
+    cbdata.u.activate_mode_data.parent = parent;
+    cbdata.u.activate_mode_data.mode = mode;
+    cbdata.u.activate_mode_data.activate = activate;
+
+    call_cb(&cbdata);
+
+    return cbdata.u.query_function_data.ret;
+}
+
+gboolean query_input_src_wrapper(GstPad *pad, GstObject *parent, GstQuery *query)
+{
+    struct cb_data cbdata = { QUERY_INPUT_SRC };
+
+    cbdata.u.query_function_data.pad = pad;
+    cbdata.u.query_function_data.parent = parent;
+    cbdata.u.query_function_data.query = query;
+
+    call_cb(&cbdata);
+
+    return cbdata.u.query_function_data.ret;
+}
+
+GstBusSyncReply watch_decoder_bus_wrapper(GstBus *bus, GstMessage *message, gpointer user)
+{
+    struct cb_data cbdata = { WATCH_DECODER_BUS };
+
+    cbdata.u.watch_bus_data.bus = bus;
+    cbdata.u.watch_bus_data.msg = message;
+    cbdata.u.watch_bus_data.user = user;
+
+    call_cb(&cbdata);
+
+    return cbdata.u.watch_bus_data.ret;
+}
+
+void decoder_pad_added_wrapper(GstElement *element, GstPad *pad, gpointer user)
+{
+    struct cb_data cbdata = { DECODER_PAD_ADDED };
+
+    cbdata.u.pad_added_data.element = element;
+    cbdata.u.pad_added_data.pad = pad;
+    cbdata.u.pad_added_data.user = user;
+
+    call_cb(&cbdata);
+}
+
+GstFlowReturn decoder_new_sample_wrapper(GstElement *appsink, gpointer user)
+{
+    struct cb_data cbdata = {DECODER_NEW_SAMPLE};
+
+    cbdata.u.new_sample_data.appsink = appsink;
+    cbdata.u.new_sample_data.user = user;
+
+    call_cb(&cbdata);
+
+    return cbdata.u.new_sample_data.ret;
 }
