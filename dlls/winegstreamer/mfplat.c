@@ -410,6 +410,16 @@ static GUID CLSID_WINEAudioConverter = {0x6a170414,0xaad9,0x4693,{0xb8,0x06,0x3a
 
 static GUID CLSID_CColorConvertDMO = {0x98230571,0x0087,0x4204,{0xb0,0x20,0x32,0x82,0x53,0x8e,0x57,0xd3}};
 
+static HRESULT h264_decoder_create(REFIID riid, void **ret)
+{
+    return generic_decoder_construct(riid, ret, DECODER_TYPE_H264);
+}
+
+static HRESULT aac_decoder_create(REFIID riid, void **ret)
+{
+    return generic_decoder_construct(riid, ret, DECODER_TYPE_AAC);
+}
+
 static const struct class_object
 {
     const GUID *clsid;
@@ -421,6 +431,8 @@ class_objects[] =
     { &CLSID_GStreamerByteStreamHandler, &winegstreamer_stream_handler_create },
     { &CLSID_WINEAudioConverter, &audio_converter_create },
     { &CLSID_CColorConvertDMO, &color_converter_create },
+    { &CLSID_CMSH264DecoderMFT, &h264_decoder_create },
+    { &CLSID_CMSAACDecMFT, &aac_decoder_create },
 };
 
 HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj)
@@ -477,6 +489,32 @@ const GUID *color_converter_supported_types[] =
     &MFVideoFormat_YVYU,
 };
 
+static WCHAR h264decoderW[] = {'H','.','2','6','4',' ','D','e','c','o','d','e','r',0};
+const GUID *h264_decoder_input_types[] =
+{
+    &MFVideoFormat_H264,
+};
+const GUID *h264_decoder_output_types[] =
+{
+    &MFVideoFormat_NV12,
+    &MFVideoFormat_I420,
+    &MFVideoFormat_IYUV,
+    &MFVideoFormat_YUY2,
+    &MFVideoFormat_YV12,
+};
+
+static WCHAR aacdecoderW[] = {'A','A','C',' ','D','e','c','o','d','e','r',0};
+const GUID *aac_decoder_input_types[] =
+{
+    &MFAudioFormat_AAC,
+};
+
+const GUID *aac_decoder_output_types[] =
+{
+    &MFAudioFormat_Float,
+    &MFAudioFormat_PCM,
+};
+
 static const struct mft
 {
     const GUID *clsid;
@@ -514,6 +552,30 @@ mfts[] =
         color_converter_supported_types,
         ARRAY_SIZE(color_converter_supported_types),
         color_converter_supported_types,
+        NULL
+    },
+    {
+        &CLSID_CMSH264DecoderMFT,
+        &MFT_CATEGORY_VIDEO_DECODER,
+        h264decoderW,
+        MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Video,
+        ARRAY_SIZE(h264_decoder_input_types),
+        h264_decoder_input_types,
+        ARRAY_SIZE(h264_decoder_output_types),
+        h264_decoder_output_types,
+        NULL
+    },
+    {
+        &CLSID_CMSAACDecMFT,
+        &MFT_CATEGORY_AUDIO_DECODER,
+        aacdecoderW,
+        MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Audio,
+        ARRAY_SIZE(aac_decoder_input_types),
+        aac_decoder_input_types,
+        ARRAY_SIZE(aac_decoder_output_types),
+        aac_decoder_output_types,
         NULL
     },
 };
@@ -574,7 +636,6 @@ struct aac_user_data
 {
     WORD payload_type;
     WORD profile_level_indication;
-    WORD struct_type;
     WORD reserved;
   /* audio-specific-config is stored here */
 };
