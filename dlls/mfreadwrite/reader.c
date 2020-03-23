@@ -2127,6 +2127,10 @@ static HRESULT create_source_reader_from_source(IMFMediaSource *source, IMFAttri
             break;
 
         object->streams[i].index = i;
+
+        hr = IMFPresentationDescriptor_SelectStream(object->descriptor, i);
+        if (FAILED(hr))
+            break;
     }
 
     if (FAILED(hr))
