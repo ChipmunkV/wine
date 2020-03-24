@@ -1046,6 +1046,21 @@ GstCaps *make_mf_compatible_caps(GstCaps *caps)
     return ret;
 }
 
+static void user_data_to_codec_data(IMFMediaType *type, GstCaps *caps)
+{
+    BYTE *user_data;
+    DWORD user_data_size;
+
+    if (SUCCEEDED(IMFMediaType_GetAllocatedBlob(type, &MF_MT_USER_DATA, &user_data, &user_data_size)))
+    {
+        GstBuffer *codec_data_buffer = gst_buffer_new_allocate(NULL, user_data_size, NULL);
+        gst_buffer_fill(codec_data_buffer, 0, user_data, user_data_size);
+        gst_caps_set_simple(caps, "codec_data", GST_TYPE_BUFFER, codec_data_buffer, NULL);
+        gst_buffer_unref(codec_data_buffer);
+        CoTaskMemFree(user_data);
+    }
+}
+
 GstCaps *caps_from_mf_media_type(IMFMediaType *type)
 {
     GUID major_type;
@@ -1116,6 +1131,42 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
                 if (level)
                     gst_caps_set_simple(output, "level", G_TYPE_STRING, level, NULL);
             }
+        }
+        else if (IsEqualGUID(&subtype, &MFVideoFormat_WMV1))
+        {
+            output = gst_caps_new_empty_simple("video/x-wmv");
+            gst_caps_set_simple(output, "format", G_TYPE_STRING, "WMV1", NULL);
+
+            gst_caps_set_simple(output, "wmvversion", G_TYPE_INT, 1, NULL);
+
+            user_data_to_codec_data(type, output);
+        }
+        else if (IsEqualGUID(&subtype, &MFVideoFormat_WMV2))
+        {
+            output = gst_caps_new_empty_simple("video/x-wmv");
+            gst_caps_set_simple(output, "format", G_TYPE_STRING, "WMV2", NULL);
+
+            gst_caps_set_simple(output, "wmvversion", G_TYPE_INT, 2, NULL);
+
+            user_data_to_codec_data(type, output);
+        }
+        else if (IsEqualGUID(&subtype, &MFVideoFormat_WMV3))
+        {
+            output = gst_caps_new_empty_simple("video/x-wmv");
+            gst_caps_set_simple(output, "format", G_TYPE_STRING, "WMV3", NULL);
+
+            gst_caps_set_simple(output, "wmvversion", G_TYPE_INT, 3, NULL);
+
+            user_data_to_codec_data(type, output);
+        }
+        else if (IsEqualGUID(&subtype, &MFVideoFormat_WVC1))
+        {
+            output = gst_caps_new_empty_simple("video/x-wmv");
+            gst_caps_set_simple(output, "format", G_TYPE_STRING, "WVC1", NULL);
+
+            gst_caps_set_simple(output, "wmvversion", G_TYPE_INT, 3, NULL);
+
+            user_data_to_codec_data(type, output);
         }
         else
         {
