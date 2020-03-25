@@ -18,5 +18,5 @@
 
 #include "windef.h"
 
-/* @makedep: test.mp4 */
-test.mp4 RCDATA test.mp4
+/* @makedep: test.wav */
+test.wav RCDATA test.wav
