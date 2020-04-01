@@ -1429,7 +1429,6 @@ static void test_topology_loader(void)
 
     /* Empty topology */
     hr = IMFTopoLoader_Load(loader, topology, &full_topology, NULL);
-todo_wine
     ok(hr == MF_E_TOPO_UNSUPPORTED, "Unexpected hr %#x.\n", hr);
 
     hr = MFCreateSourceResolver(&resolver);
@@ -1476,7 +1475,6 @@ todo_wine
 
     /* Source node only. */
     hr = IMFTopoLoader_Load(loader, topology, &full_topology, NULL);
-todo_wine
     ok(hr == MF_E_TOPO_UNSUPPORTED, "Unexpected hr %#x.\n", hr);
 
     /* Add grabber sink. */
@@ -1502,7 +1500,6 @@ todo_wine
     ok(hr == S_OK, "Failed to add sink node, hr %#x.\n", hr);
 
     hr = IMFTopoLoader_Load(loader, topology, &full_topology, NULL);
-todo_wine
     ok(hr == MF_E_TOPO_UNSUPPORTED, "Unexpected hr %#x.\n", hr);
 
     hr = IMFTopologyNode_ConnectOutput(src_node, 0, sink_node, 0);
