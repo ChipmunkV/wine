@@ -2026,7 +2026,7 @@ static HRESULT topology_loader_resolve_branch(IMFTopologyNode *src, IMFMediaType
                         IMFTopologyNode_ConnectOutput(src, 0, node_dec, 0);
                         IMFTopologyNode_ConnectOutput(node_dec, 0, sink, 0);
 
-                        IMFActivate_ShutdownObject(activates_convs[i]);
+                        IMFActivate_ShutdownObject(activates_decs[i]);
                         return S_OK;
                     }
 
@@ -2165,12 +2165,14 @@ static HRESULT topology_loader_resolve_partial_topology(struct topology_node *sr
     }
     else
     {
-        if (SUCCEEDED(topology_loader_resolve_branch(clone_src, src_mediatypes[0], clone_sink, MF_CONNECT_DIRECT)))
-        {
-            topology_loader_add_branch(*full_topology, clone_src, clone_sink);
-            heap_free(src_mediatypes);
-            return S_OK;
-        }
+        for (method = MF_CONNECT_DIRECT; method < MF_CONNECT_RESOLVE_INDEPENDENT_OUTPUTTYPES; method++)
+            if (SUCCEEDED(topology_loader_resolve_branch(clone_src, src_mediatypes[0], clone_sink, method)))
+            {
+                TRACE("Successfully connected nodes with method %u\n", method);
+                topology_loader_add_branch(*full_topology, clone_src, clone_sink);
+                heap_free(src_mediatypes);
+                return S_OK;
+            }
     }
 
     heap_free(src_mediatypes);
