@@ -27,7 +27,7 @@ const GUID *h264_input_types[] = {&MFVideoFormat_H264};
 const GUID *h264_output_types[] = {&MFVideoFormat_NV12, &MFVideoFormat_I420, &MFVideoFormat_IYUV, &MFVideoFormat_YUY2, &MFVideoFormat_YV12};
 
 const GUID *aac_input_types[] = {&MFAudioFormat_AAC};
-const GUID *aac_output_types[] = {&MFAudioFormat_Float};
+const GUID *aac_output_types[] = {&MFAudioFormat_Float, &MFAudioFormat_PCM};
 
 const GUID *wmv_input_types[] = {&MFVideoFormat_WMV3, &MFVideoFormat_WVC1};
 const GUID *wmv_output_types[] = {&MFVideoFormat_NV12, &MFVideoFormat_YV12, &MFVideoFormat_YUY2, &MFVideoFormat_UYVY, &MFVideoFormat_YVYU, &MFVideoFormat_NV11, &MFVideoFormat_RGB32, &MFVideoFormat_RGB24, &MFVideoFormat_RGB555, &MFVideoFormat_RGB8};
