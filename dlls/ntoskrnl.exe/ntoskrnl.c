@@ -870,7 +870,7 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
 
     for (;;)
     {
-        NtCurrentTeb()->Reserved5[1] = NULL;
+        NtCurrentTeb()->SystemReserved1[15] = NULL;
         if (!context.in_buff && !(context.in_buff = HeapAlloc( GetProcessHeap(), 0, context.in_size )))
         {
             ERR( "failed to allocate buffer\n" );
@@ -891,7 +891,7 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
                 context.params  = reply->params;
                 context.in_size = reply->in_size;
                 client_tid = reply->client_tid;
-                NtCurrentTeb()->Reserved5[1] = wine_server_get_ptr( reply->client_thread );
+                NtCurrentTeb()->SystemReserved1[15] = wine_server_get_ptr( reply->client_thread );
             }
             else
             {
@@ -2338,7 +2338,7 @@ POBJECT_TYPE PsThreadType = &thread_type;
  */
 PRKTHREAD WINAPI KeGetCurrentThread(void)
 {
-    struct _KTHREAD *thread = NtCurrentTeb()->Reserved5[1];
+    struct _KTHREAD *thread = NtCurrentTeb()->SystemReserved1[15];
 
     if (!thread)
     {
@@ -2351,7 +2351,7 @@ PRKTHREAD WINAPI KeGetCurrentThread(void)
         kernel_object_from_handle( handle, PsThreadType, (void**)&thread );
         if (handle != GetCurrentThread()) NtClose( handle );
 
-        NtCurrentTeb()->Reserved5[1] = thread;
+        NtCurrentTeb()->SystemReserved1[15] = thread;
     }
 
     return thread;
@@ -2912,6 +2912,22 @@ DEVICE_OBJECT* WINAPI IoGetAttachedDeviceReference( DEVICE_OBJECT *device )
 }
 
 
+struct system_thread_ctx
+{
+    PKSTART_ROUTINE start;
+    PVOID context;
+};
+
+static void WINAPI init_system_thread(PVOID context)
+{
+    struct system_thread_ctx info = *(struct system_thread_ctx *)context;
+    HeapFree( GetProcessHeap(), 0, context );
+
+    NtCurrentTeb()->SystemReserved1[15] = KeGetCurrentThread();
+
+    info.start(info.context);
+}
+
 /***********************************************************************
  *           PsCreateSystemThread   (NTOSKRNL.EXE.@)
  */
@@ -2920,9 +2936,16 @@ NTSTATUS WINAPI PsCreateSystemThread(PHANDLE ThreadHandle, ULONG DesiredAccess,
 			             HANDLE ProcessHandle, PCLIENT_ID ClientId,
                                      PKSTART_ROUTINE StartRoutine, PVOID StartContext)
 {
+    struct system_thread_ctx *info;
+
     if (!ProcessHandle) ProcessHandle = GetCurrentProcess();
+
+    info = HeapAlloc( GetProcessHeap(), 0, sizeof(*info) );
+    info->start = StartRoutine;
+    info->context = StartContext;
+
     return RtlCreateUserThread(ProcessHandle, 0, FALSE, 0, 0,
-                               0, StartRoutine, StartContext,
+                               0, init_system_thread, info,
                                ThreadHandle, ClientId);
 }
 
