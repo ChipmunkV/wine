@@ -32,6 +32,9 @@ const GUID *aac_output_types[] = {&MFAudioFormat_Float, &MFAudioFormat_PCM};
 const GUID *wmv_input_types[] = {&MFVideoFormat_WMV3, &MFVideoFormat_WVC1};
 const GUID *wmv_output_types[] = {&MFVideoFormat_NV12, &MFVideoFormat_YV12, &MFVideoFormat_YUY2, &MFVideoFormat_UYVY, &MFVideoFormat_YVYU, &MFVideoFormat_NV11, &MFVideoFormat_RGB32, &MFVideoFormat_RGB24, &MFVideoFormat_RGB555, &MFVideoFormat_RGB8};
 
+const GUID *m4s2_input_types[] = {&MFVideoFormat_MPEG2};
+const GUID *m4s2_output_types[] = {&MFVideoFormat_I420, &MFVideoFormat_IYUV, &MFVideoFormat_NV12, &MFVideoFormat_YUY2, &MFVideoFormat_YV12};
+
 static struct decoder_desc
 {
     const GUID *major_type;
@@ -61,6 +64,13 @@ static struct decoder_desc
         ARRAY_SIZE(wmv_input_types),
         wmv_output_types,
         ARRAY_SIZE(wmv_output_types),
+    },
+    { /* DECODER_TYPE_M4S2 */
+        &MFMediaType_Video,
+        m4s2_input_types,
+        ARRAY_SIZE(m4s2_input_types),
+        m4s2_output_types,
+        ARRAY_SIZE(m4s2_output_types),
     }
 };
 

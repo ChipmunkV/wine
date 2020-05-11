@@ -76,6 +76,12 @@ coclass CMSAACDecMFT { }
 
 [
     threading(both),
+    uuid(5686a0d9-fe39-409f-9dff-3fdbc849f9f5)
+]
+coclass CMpeg4sDecMFT { }
+
+[
+    threading(both),
     uuid(82d353df-90bd-4382-8bc2-3f6192b76e34)
 ]
 coclass CLSID_CWMVDecMediaObject {}
