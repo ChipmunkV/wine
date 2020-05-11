@@ -424,6 +424,12 @@ static HRESULT wmv_decoder_create(REFIID riid, void **ret)
 {
     return generic_decoder_construct(riid, ret, DECODER_TYPE_WMV);
 }
+
+static HRESULT m4s2_decoder_create(REFIID riid, void **ret)
+{
+    return generic_decoder_construct(riid, ret, DECODER_TYPE_M4S2);
+}
+
 static const struct class_object
 {
     const GUID *clsid;
@@ -438,6 +444,7 @@ class_objects[] =
     { &CLSID_CMSH264DecoderMFT, &h264_decoder_create },
     { &CLSID_CMSAACDecMFT, &aac_decoder_create },
     { &CLSID_CWMVDecMediaObject, &wmv_decoder_create },
+    { &CLSID_CMpeg4sDecMFT, m4s2_decoder_create },
 };
 
 HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj)
@@ -543,6 +550,22 @@ const GUID *wmv_decoder_output_types[] =
     &MFVideoFormat_RGB8,
 };
 
+static WCHAR m4s2decoderW[] = {'M','p','e','g','4','s',' ','D','e','c','o','d','e','r',' ','M','F','T',0};
+
+const GUID *m4s2_decoder_input_types[] =
+{
+    &MFVideoFormat_M4S2,
+};
+
+const GUID *m4s2_decoder_output_types[] =
+{
+    &MFVideoFormat_I420,
+    &MFVideoFormat_IYUV,
+    &MFVideoFormat_NV12,
+    &MFVideoFormat_YUY2,
+    &MFVideoFormat_YV12,
+};
+
 static const struct mft
 {
     const GUID *clsid;
@@ -616,6 +639,18 @@ mfts[] =
         wmv_decoder_input_types,
         ARRAY_SIZE(wmv_decoder_output_types),
         wmv_decoder_output_types,
+        NULL
+    },
+    {
+        &CLSID_CMpeg4sDecMFT,
+        &MFT_CATEGORY_VIDEO_DECODER,
+        m4s2decoderW,
+        MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Video,
+        ARRAY_SIZE(m4s2_decoder_input_types),
+        m4s2_decoder_input_types,
+        ARRAY_SIZE(m4s2_decoder_output_types),
+        m4s2_decoder_output_types,
         NULL
     },
 };

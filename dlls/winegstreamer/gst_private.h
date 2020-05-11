@@ -90,6 +90,7 @@ enum decoder_type
     DECODER_TYPE_H264,
     DECODER_TYPE_AAC,
     DECODER_TYPE_WMV,
+    DECODER_TYPE_M4S2,
 };
 HRESULT generic_decoder_construct(REFIID riid, void **obj, enum decoder_type) DECLSPEC_HIDDEN;
 HRESULT winegstreamer_stream_handler_create(REFIID riid, void **obj) DECLSPEC_HIDDEN;
