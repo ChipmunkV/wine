@@ -1168,6 +1168,14 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
 
             user_data_to_codec_data(type, output);
         }
+        else if (IsEqualGUID(&subtype, &MFVideoFormat_M4S2))
+        {
+            output = gst_caps_new_empty_simple("video/mpeg");
+            gst_caps_set_simple(output, "mpegversion", G_TYPE_INT, 4, NULL);
+            gst_caps_set_simple(output, "systemstream", G_TYPE_BOOLEAN, FALSE, NULL);
+
+            user_data_to_codec_data(type, output);
+        }
         else
         {
             GstVideoFormat format = GST_VIDEO_FORMAT_UNKNOWN;
