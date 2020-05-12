@@ -1322,6 +1322,21 @@ GstCaps *caps_from_mf_media_type(IMFMediaType *type)
                 CoTaskMemFree(user_data);
             }
         }
+        else if (IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV9) ||
+                 IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV8))
+        {
+            DWORD block_align;
+
+            output = gst_caps_new_empty_simple("audio/x-wma");
+
+            gst_caps_set_simple(output, "wmaversion", G_TYPE_INT,
+                IsEqualGUID(&subtype, &MFAudioFormat_WMAudioV9) ? 3 : 2, NULL);
+
+            if (SUCCEEDED(IMFMediaType_GetUINT32(type, &MF_MT_AUDIO_BLOCK_ALIGNMENT, &block_align)))
+                gst_caps_set_simple(output, "block_align", G_TYPE_INT, block_align, NULL);
+
+            user_data_to_codec_data(type, output);
+        }
         else
         {
             FIXME("Unrecognized subtype %s\n", debugstr_guid(&subtype));
