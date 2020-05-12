@@ -88,6 +88,12 @@ coclass CLSID_CWMVDecMediaObject {}
 
 [
     threading(both),
+    uuid(2eeb4adf-4578-4d10-bca7-bb955f56320a)
+]
+coclass CLSID_CWMADecMediaObject {}
+
+[
+    threading(both),
     uuid(98230571-0087-4204-b020-3282538e57d3)
 ]
 coclass CColorConvertDMO { }

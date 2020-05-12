@@ -421,6 +421,11 @@ static HRESULT wmv_decoder_create(REFIID riid, void **ret)
     return generic_decoder_construct(riid, ret, DECODER_TYPE_WMV);
 }
 
+static HRESULT wma_decoder_create(REFIID riid, void **ret)
+{
+    return generic_decoder_construct(riid, ret, DECODER_TYPE_WMA);
+}
+
 static HRESULT m4s2_decoder_create(REFIID riid, void **ret)
 {
     return generic_decoder_construct(riid, ret, DECODER_TYPE_M4S2);
@@ -440,6 +445,7 @@ class_objects[] =
     { &CLSID_CMSH264DecoderMFT, &h264_decoder_create },
     { &CLSID_CMSAACDecMFT, &aac_decoder_create },
     { &CLSID_CWMVDecMediaObject, &wmv_decoder_create },
+    { &CLSID_CWMADecMediaObject, &wma_decoder_create },
     { &CLSID_CMpeg4sDecMFT, m4s2_decoder_create },
     { &CLSID_CColorConvertDMO, &color_converter_create },
 };
@@ -540,6 +546,20 @@ const GUID *wmv_decoder_output_types[] =
     &MFVideoFormat_RGB8,
 };
 
+static WCHAR wmadecoderW[] = {'W','M','A','u','d','i','o',' ','D','e','c','o','d','e','r',' ','M','F','T',0};
+
+const GUID *wma_decoder_input_types[] =
+{
+    &MFAudioFormat_WMAudioV8,
+    &MFAudioFormat_WMAudioV9,
+};
+
+const GUID *wma_decoder_output_types[] =
+{
+    &MFAudioFormat_Float,
+    &MFAudioFormat_PCM,
+};
+
 static WCHAR m4s2decoderW[] = {'M','p','e','g','4','s',' ','D','e','c','o','d','e','r',' ','M','F','T',0};
 
 const GUID *m4s2_decoder_input_types[] =
@@ -617,6 +637,18 @@ mfts[] =
         wmv_decoder_input_types,
         ARRAY_SIZE(wmv_decoder_output_types),
         wmv_decoder_output_types,
+        NULL
+    },
+    {
+        &CLSID_CWMADecMediaObject,
+        &MFT_CATEGORY_AUDIO_DECODER,
+        wmadecoderW,
+        MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Audio,
+        ARRAY_SIZE(wma_decoder_input_types),
+        wma_decoder_input_types,
+        ARRAY_SIZE(wma_decoder_output_types),
+        wma_decoder_output_types,
         NULL
     },
     {
