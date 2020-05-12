@@ -830,6 +830,30 @@ IMFMediaType *mf_media_type_from_caps(const GstCaps *caps)
                     FIXME("Unhandled mpegversion %d\n", mpeg_version);
             }
         }
+        else if (!(strcmp(mime_type, "audio/x-wma")))
+        {
+            gint wma_version, block_align;
+
+            if (gst_structure_get_int(info, "wmaversion", &wma_version))
+            {
+                switch (wma_version)
+                {
+                    case 2:
+                        IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFAudioFormat_WMAudioV8);
+                        break;
+                    case 3:
+                        IMFMediaType_SetGUID(media_type, &MF_MT_SUBTYPE, &MFAudioFormat_WMAudioV9);
+                        break;
+                    default:
+                        FIXME("Unrecognized wmaversion %d\n", wma_version);
+                }
+            }
+
+            if (gst_structure_get_int(info, "block_align", &block_align))
+                IMFMediaType_SetUINT32(media_type, &MF_MT_AUDIO_BLOCK_ALIGNMENT, block_align);
+
+            codec_data_to_user_data(info, media_type);
+        }
         else
         {
             FIXME("Unrecognized audio format %s\n", mime_type);
