@@ -327,8 +327,10 @@ static HRESULT WINAPI mf_decoder_GetOutputAvailableType(IMFTransform *iface, DWO
 
     copy_attr(output_type, decoder->input_type, &MF_MT_FRAME_SIZE);
     copy_attr(output_type, decoder->input_type, &MF_MT_FRAME_RATE);
-    copy_attr(output_type, decoder->input_type, &MF_MT_AUDIO_NUM_CHANNELS);
     copy_attr(output_type, decoder->input_type, &MF_MT_AUDIO_SAMPLES_PER_SECOND);
+
+    /* TODO: support both stereo folding and matching channels */
+    IMFMediaType_SetUINT32(output_type, &MF_MT_AUDIO_NUM_CHANNELS, 2);
 
     if (FAILED(hr = IMFMediaType_SetGUID(output_type, &MF_MT_MAJOR_TYPE, decoder_descs[decoder->type].major_type)))
     {
