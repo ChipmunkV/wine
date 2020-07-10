@@ -75,6 +75,7 @@ struct process
     unsigned int         is_system:1;     /* is it a system process? */
     unsigned int         debug_children:1;/* also debug all child processes */
     unsigned int         is_terminating:1;/* is process terminating? */
+    unsigned int         is_kernel:1;     /* winedevice process */
     struct job          *job;             /* job object ascoicated with this process */
     struct list          job_entry;       /* list entry for job object */
     struct list          asyncs;          /* list of async object owned by the process */
@@ -98,6 +99,8 @@ struct process
     const struct rawinput_device *rawinput_mouse; /* rawinput mouse device, if any */
     const struct rawinput_device *rawinput_kbd;   /* rawinput keyboard device, if any */
     struct list          kernel_object;   /* list of kernel object pointers */
+    struct object        *callback_init_event;
+    struct device_manager *dev_mgr;
 };
 
 #define CPU_FLAG(cpu) (1 << (cpu))

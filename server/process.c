@@ -42,6 +42,7 @@
 #define WIN32_NO_STATUS
 #include "winternl.h"
 
+#include "device.h"
 #include "file.h"
 #include "handle.h"
 #include "process.h"
@@ -507,6 +508,7 @@ struct process *create_process( int fd, struct process *parent, int inherit_all,
                                 unsigned int handle_count, struct token *token )
 {
     struct process *process;
+    krnl_cbdata_t cbdata;
 
     if (!(process = alloc_object( &process_ops )))
     {
@@ -527,6 +529,7 @@ struct process *create_process( int fd, struct process *parent, int inherit_all,
     process->is_system       = 0;
     process->debug_children  = 1;
     process->is_terminating  = 0;
+    process->is_kernel       = 0;
     process->job             = NULL;
     process->console         = NULL;
     process->startup_state   = STARTUP_IN_PROGRESS;
@@ -542,6 +545,8 @@ struct process *create_process( int fd, struct process *parent, int inherit_all,
     process->trace_data      = 0;
     process->rawinput_mouse  = NULL;
     process->rawinput_kbd    = NULL;
+    process->dev_mgr         = NULL;
+    process->callback_init_event = NULL;
     list_init( &process->kernel_object );
     list_init( &process->thread_list );
     list_init( &process->locks );
@@ -598,6 +603,13 @@ struct process *create_process( int fd, struct process *parent, int inherit_all,
     if (!token_assign_label( process->token, security_high_label_sid ))
         goto error;
 
+    cbdata.cb_type = SERVER_CALLBACK_PROC_LIFE;
+    cbdata.process_life.create = 1;
+    cbdata.process_life.pid = process->id;
+    cbdata.process_life.ppid = process->parent_id;
+
+    queue_callback(&cbdata, NULL, NULL);
+
     set_fd_events( process->msg_fd, POLLIN );  /* start listening to events */
     return process;
 
@@ -645,6 +657,7 @@ static void process_destroy( struct object *obj )
     if (process->exe_file) release_object( process->exe_file );
     if (process->id) free_ptid( process->id );
     if (process->token) release_object( process->token );
+    if (process->callback_init_event) release_object( process->callback_init_event );
     free( process->dir_cache );
 }
 
@@ -803,7 +816,8 @@ static inline struct process_dll *find_process_dll( struct process *process, mod
 
 /* add a dll to a process list */
 static struct process_dll *process_load_dll( struct process *process, mod_handle_t base,
-                                             const WCHAR *filename, data_size_t name_len )
+                                             const WCHAR *filename, data_size_t name_len,
+                                             struct object **done_event )
 {
     struct process_dll *dll;
 
@@ -816,6 +830,9 @@ static struct process_dll *process_load_dll( struct process *process, mod_handle
 
     if ((dll = mem_alloc( sizeof(*dll) )))
     {
+        krnl_cbdata_t cbdata;
+        struct unicode_str filename_str = {filename, name_len};
+
         dll->base = base;
         dll->filename = NULL;
         dll->namelen  = name_len;
@@ -825,6 +842,12 @@ static struct process_dll *process_load_dll( struct process *process, mod_handle
             return NULL;
         }
         list_add_tail( &process->dlls, &dll->entry );
+
+        cbdata.cb_type = SERVER_CALLBACK_IMAGE_LIFE;
+        cbdata.image_life.pid = current->process->id;
+        cbdata.image_life.base = base;
+        cbdata.image_life.size = 0;
+        queue_callback(&cbdata, filename ? &filename_str : NULL, done_event);
     }
     return dll;
 }
@@ -903,6 +926,9 @@ void kill_console_processes( struct thread *renderer, int exit_code )
 static void process_killed( struct process *process )
 {
     struct list *ptr;
+    krnl_cbdata_t cbdata;
+
+    queue_callback(&cbdata, NULL, NULL);
 
     assert( list_empty( &process->thread_list ));
     process->end_time = current_time;
@@ -941,6 +967,11 @@ static void process_killed( struct process *process )
     release_job_process( process );
     start_sigkill_timer( process );
     wake_up( &process->obj, 0 );
+
+    cbdata.cb_type = SERVER_CALLBACK_PROC_LIFE;
+    cbdata.process_life.create = 0;
+    cbdata.process_life.pid = process->id;
+    cbdata.process_life.ppid = process->parent_id;
 }
 
 /* add a thread to a process running threads list */
@@ -1402,6 +1433,12 @@ DECL_HANDLER(init_process_done)
     if (req->gui) process->idle_event = create_event( NULL, NULL, 0, 1, 0, NULL );
     if (process->debugger) set_process_debug_flag( process, 1 );
     reply->suspend = (current->suspend || process->suspend);
+    if (process->callback_init_event)
+    {
+        reply->processed_event = alloc_handle(process, process->callback_init_event, SYNCHRONIZE, 0);
+        release_object(process->callback_init_event);
+        process->callback_init_event = NULL;
+    }
 }
 
 /* open a handle to a process */
@@ -1574,15 +1611,29 @@ DECL_HANDLER(write_process_memory)
 DECL_HANDLER(load_dll)
 {
     struct process_dll *dll;
+    struct object *done_event = NULL;
 
-    if ((dll = process_load_dll( current->process, req->base, get_req_data(), get_req_data_size() )))
+    if ((dll = process_load_dll( current->process, req->base, get_req_data(), get_req_data_size(), &done_event )))
     {
         dll->dbg_offset = req->dbg_offset;
         dll->dbg_size   = req->dbg_size;
         dll->name       = req->name;
         /* only generate event if initialization is done */
         if (is_process_init_done( current->process ))
+        {
             generate_debug_event( current, LOAD_DLL_DEBUG_EVENT, dll );
+            if (done_event)
+            {
+                reply->processed_event = alloc_handle(current->process, done_event, SYNCHRONIZE, 0);
+                release_object(done_event);
+            }
+        }
+        else if (done_event)
+        {
+            if (current->process->callback_init_event)
+                release_object(current->process->callback_init_event);
+            current->process->callback_init_event = done_event;
+        }
     }
 }
 

@@ -53,6 +53,7 @@ my %formats =
     "ioctl_code_t"  => [  4,   4,  "&dump_ioctl_code" ],
     "client_cpu_t"  => [  4,   4,  "&dump_client_cpu" ],
     "hw_input_t"    => [  32,  8,  "&dump_hw_input" ],
+    "krnl_cbdata_t" => [  32,  8,  "&dump_krnl_cbdata" ],
 );
 
 my @requests = ();

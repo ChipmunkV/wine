@@ -422,6 +422,17 @@ static void dump_hw_input( const char *prefix, const hw_input_t *input )
     }
 }
 
+static void dump_krnl_cbdata( const char *prefix, const krnl_cbdata_t *input )
+{
+    switch(input->cb_type)
+    {
+    case SERVER_CALLBACK_PROC_LIFE:
+        fprintf(stderr, "%s{type=PROCESS_%s,pid=%04x,ppid=%04x}",
+                prefix, input->process_life.create ? "CREATE" : "TERMINATE", input->process_life.pid, input->process_life.ppid);
+        break;
+    }
+}
+
 static void dump_luid( const char *prefix, const luid_t *luid )
 {
     fprintf( stderr, "%s%d.%u", prefix, luid->high_part, luid->low_part );

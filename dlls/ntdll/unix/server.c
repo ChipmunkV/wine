@@ -1467,6 +1467,7 @@ void server_init_process_done(void)
     void *entry = (char *)peb->ImageBaseAddress + nt->OptionalHeader.AddressOfEntryPoint;
     NTSTATUS status;
     int suspend;
+    HANDLE processed_event;
 
 #ifdef __APPLE__
     send_server_task_port();
@@ -1489,10 +1490,18 @@ void server_init_process_done(void)
         req->gui      = (nt->OptionalHeader.Subsystem != IMAGE_SUBSYSTEM_WINDOWS_CUI);
         status = wine_server_call( req );
         suspend = reply->suspend;
+        processed_event = wine_server_ptr_handle(reply->processed_event);
     }
     SERVER_END_REQ;
 
     assert( !status );
+
+    if (processed_event)
+    {
+        NtWaitForSingleObject(processed_event, FALSE, NULL);
+        NtClose(processed_event);
+    }
+
     signal_start_thread( entry, peb, suspend, pLdrInitializeThunk, NtCurrentTeb() );
 }
 

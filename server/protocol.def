@@ -868,6 +868,7 @@ typedef struct
     client_ptr_t entry;        /* process entry point */
 @REPLY
     int          suspend;      /* is process suspended? */
+    obj_handle_t processed_event;
 @END
 
 
@@ -3392,6 +3393,51 @@ struct handle_info
     obj_handle_t handle;          /* kernel object handle */
 @END
 
+
+@REQ(callback_subscribe)
+    obj_handle_t manager;
+    int callback_mask;
+@END
+
+enum operation_type { CREATE_PROC };
+
+typedef union
+{
+    int cb_type;
+    struct
+    {
+        int cb_type;
+        int create;   /* creation or destruction */
+        process_id_t pid;
+        process_id_t ppid;
+    } process_life;
+    struct
+    {
+        int cb_type;
+        enum operation_type op_type;
+        unsigned int access;
+        unsigned int status;
+        process_id_t source_pid;
+        process_id_t target_pid;
+        obj_handle_t object;
+        unsigned int padding;
+    } handle_event;
+} krnl_cbdata_t;
+
+enum kernel_callback_type
+{
+    SERVER_CALLBACK_PROC_LIFE = 0x1,
+    SERVER_CALLBACK_HANDLE_EVENT = 0x8
+};
+
+@REQ(get_next_callback_event)
+    obj_handle_t manager;
+@REPLY
+    krnl_cbdata_t cb_data;
+    thread_id_t   client_tid;
+    client_ptr_t  client_thread;
+    VARARG(string_paramenter,unicode_str); /* type defined meaning */
+@END
 
 /* Make the current process a system process */
 @REQ(make_process_system)
