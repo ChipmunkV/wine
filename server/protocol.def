@@ -63,7 +63,7 @@ struct reply_header
 /* this is used to construct the generic_request union */
 struct request_max_size
 {
-    int pad[16]; /* the max request size is 16 ints */
+    int pad[18]; /* the max request size is 16 ints */
 };
 
 #define FIRST_USER_HANDLE 0x0020  /* first possible value for low word of user handle */
@@ -467,7 +467,9 @@ enum apc_type
     APC_MAP_VIEW,
     APC_UNMAP_VIEW,
     APC_CREATE_THREAD,
-    APC_BREAK_PROCESS
+    APC_BREAK_PROCESS,
+    APC_REAL_USER,
+    APC_REAL_KERNEL,
 };
 
 typedef union
@@ -577,6 +579,11 @@ typedef union
         mem_size_t       reserve;   /* reserve size for thread stack */
         mem_size_t       commit;    /* commit size for thread stack */
     } create_thread;
+    struct
+    {
+        enum apc_type    type;      /* APC_REAL_KERNEL && APC_REAL_USER */
+        int special_apc;
+    } real_apc;
 } apc_call_t;
 
 typedef union
@@ -1056,6 +1063,11 @@ typedef struct
 @REPLY
     obj_handle_t handle;       /* APC handle */
     int          self;         /* run APC in caller itself? */
+@END
+
+@REQ(finalize_apc)
+    obj_handle_t handle;       /* handle to the apc */
+    apc_call_t   call;         /* real call */
 @END
 
 

@@ -714,6 +714,161 @@ BOOLEAN WINAPI KeAlertThread(PKTHREAD thread, KPROCESSOR_MODE mode)
     return TRUE;
 }
 
+static DWORD WINAPI thread_impersonate_loop(PVOID context)
+{
+    PKTHREAD thread = (PKTHREAD) context;
+    PKAPC apc;
+    HANDLE apc_handle;
+    PKNORMAL_ROUTINE nrml_routine;
+    PVOID nrml_ctx;
+    PVOID sysarg1;
+    PVOID sysarg2;
+    PKAPC wait_apcs[3];
+    HANDLE wait_handles[3];
+    DWORD wait_count;
+    NTSTATUS stat;
+
+    NtCurrentTeb()->SystemReserved1[15] = thread;
+
+    for(;;)
+    {
+        wait_handles[0] = thread->apc_event;
+        wait_count = 1;
+        EnterCriticalSection(TO_USER(&thread->apc_cs));
+        if (!IsListEmpty(&thread->ApcListHead[KernelMode]))
+        {
+            wait_apcs[0] = CONTAINING_RECORD(thread->ApcListHead[KernelMode].Flink, KAPC, ApcListEntry);
+            wait_handles[1] = wine_server_ptr_handle(wait_apcs[0]->Spare0);
+            wait_count++;
+        }
+        if (!IsListEmpty(&thread->ApcListHead[UserMode]))
+        {
+            wait_apcs[wait_count - 1] = CONTAINING_RECORD(thread->ApcListHead[UserMode].Flink, KAPC, ApcListEntry);
+            wait_handles[wait_count] = wine_server_ptr_handle(wait_apcs[wait_count - 1]->Spare0);
+            wait_count++;
+        }
+        LeaveCriticalSection(TO_USER(&thread->apc_cs));
+
+        TRACE("%u %p %p %p\n", wait_count, wait_handles[0], wait_handles[1], wait_handles[2]);
+        stat = NtWaitForMultipleObjects(wait_count, wait_handles, WaitAny, FALSE, NULL);
+        if (stat < 0)
+        {
+            ERR("Failed to wait for APC, trying again? err=%x\n", stat);
+            continue;
+        }
+        if (stat == WAIT_OBJECT_0)
+            continue;
+
+        apc = wait_apcs[stat - 1];
+
+        EnterCriticalSection(TO_USER(&thread->apc_cs));
+        RemoveEntryList(&apc->ApcListEntry);
+        LeaveCriticalSection(TO_USER(&thread->apc_cs));
+
+        apc->Inserted = FALSE;
+
+        apc_handle = wine_server_ptr_handle(apc->Spare0);
+        nrml_routine = apc->NormalRoutine;
+        nrml_ctx = apc->NormalContext;
+        sysarg1 = apc->SystemArgument1;
+        sysarg2 = apc->SystemArgument2;
+
+        TRACE("\1%04x:%04x:Call %s APC %p\n", thread->process->info.UniqueProcessId, thread->id.UniqueThread, apc->NormalRoutine ? "Normal" : "Special", apc->KernelRoutine);
+        apc->KernelRoutine(apc, &nrml_routine, &nrml_ctx, &sysarg1, &sysarg2);
+        TRACE("\1%04x:%04x:Ret %s APC %p\n", thread->process->info.UniqueProcessId, thread->id.UniqueThread, apc->NormalRoutine ? "Normal" : "Special", apc->KernelRoutine);
+
+        if (nrml_routine && apc->ApcMode == KernelMode)
+        {
+            TRACE("\1%04x:%04x:Call kernel APC NormalRoutine %p\n", thread->process->info.UniqueProcessId, thread->id.UniqueThread, nrml_routine);
+            nrml_routine(nrml_ctx, sysarg1, sysarg2);
+            TRACE("\1%04x:%04x:Ret kernel APC NormalRoutine %p\n", thread->process->info.UniqueProcessId, thread->id.UniqueThread, nrml_routine);
+        }
+
+        SERVER_START_REQ(finalize_apc)
+        {
+            req->handle = wine_server_obj_handle(apc_handle);
+            if (apc->ApcMode == UserMode && nrml_routine)
+            {
+                TRACE("finalizing APC as %p\n", nrml_routine);
+                req->call.type = APC_USER;
+                req->call.user.user.func = wine_server_client_ptr(nrml_routine);
+                req->call.user.user.args[0] = (ULONG_PTR) nrml_ctx;
+                req->call.user.user.args[1] = (ULONG_PTR) sysarg1;
+                req->call.user.user.args[2] = (ULONG_PTR) sysarg2;
+            }
+            else
+                req->call.type = APC_NONE;
+            if ((stat = wine_server_call( req )))
+            {
+                ERR("Failed to finalize apc! err=%x\n", stat);
+            }
+        }
+        SERVER_END_REQ;
+
+        CloseHandle(apc_handle);
+    }
+
+    return 0;
+}
+
+BOOLEAN WINAPI KeInsertQueueApc(PRKAPC apc, PVOID sysarg1, PVOID sysarg2, KPRIORITY increment)
+{
+    NTSTATUS stat;
+    HANDLE thread_handle;
+    obj_handle_t apc_handle;
+
+    TRACE("apc %p arg1 %p arg2 %p inc %u\ncaller %p\n", apc, sysarg1, sysarg2, increment, __builtin_return_address(0));
+
+    if(!apc->Thread->imposter_thread)
+    {
+        InitializeCriticalSection(&apc->Thread->apc_cs);
+        apc->Thread->apc_event = CreateEventA(NULL, FALSE, FALSE, NULL);
+        apc->Thread->imposter_thread = CreateThread(NULL, 0, thread_impersonate_loop, apc->Thread, 0, NULL);
+    }
+    if (!apc->Thread->imposter_thread)
+    {
+        ERR("Failed to create imposter thread\n");
+        DeleteCriticalSection(&apc->Thread->apc_cs);
+        return FALSE;
+    }
+
+    if ((stat = ObOpenObjectByPointer(apc->Thread, OBJ_KERNEL_HANDLE, NULL, THREAD_SET_CONTEXT, PsThreadType, KernelMode, &thread_handle)))
+    {
+        ERR("Failed to open APC thread; err=%x\n", stat);
+        return FALSE;
+    }
+
+    SERVER_START_REQ( queue_apc )
+    {
+        req->handle = wine_server_obj_handle(thread_handle);
+        req->call.type = apc->ApcMode ? APC_REAL_USER : APC_REAL_KERNEL;
+        req->call.real_apc.special_apc = apc->ApcMode == APC_REAL_KERNEL && !apc->NormalRoutine;
+        stat = wine_server_call( req );
+        apc_handle = reply->handle;
+    }
+    SERVER_END_REQ;
+
+    CloseHandle(thread_handle);
+
+    if (stat)
+    {
+        ERR("Failed to queue real APC, err=%x\n", stat);
+        return FALSE;
+    }
+
+    apc->SystemArgument1 = sysarg1;
+    apc->SystemArgument2 = sysarg2;
+    apc->Inserted = TRUE;
+    apc->Spare0 = apc_handle;
+
+    EnterCriticalSection(TO_USER(&apc->Thread->apc_cs));
+    InsertTailList(&apc->Thread->ApcListHead[(DWORD)apc->ApcMode], &apc->ApcListEntry);
+    if (!(SetEvent(apc->Thread->apc_event)))
+        ERR("Failed to set apc event!\n");
+    LeaveCriticalSection(TO_USER(&apc->Thread->apc_cs));
+    return TRUE;
+}
+
 static KSPIN_LOCK cancel_lock;
 
 /***********************************************************************

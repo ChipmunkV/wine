@@ -893,12 +893,12 @@ PEPROCESS PsInitialSystemProcess = NULL;
  */
 NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
 {
-    HANDLE manager = get_device_manager();
     struct dispatch_context context;
     NTSTATUS status = STATUS_SUCCESS;
     NTSTATUS cb_stat = STATUS_SUCCESS;
     WCHAR image_path[MAX_PATH];
     HANDLE handles[2];
+    manager = get_device_manager();
 
     context.handle  = NULL;
     context.irp     = NULL;
@@ -2451,6 +2451,8 @@ static void *create_thread_object( HANDLE handle )
         }
     }
 
+    InitializeListHead(&thread->ApcListHead[KernelMode]);
+    InitializeListHead(&thread->ApcListHead[UserMode]);
 
     return thread;
 }

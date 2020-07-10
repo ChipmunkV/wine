@@ -59,6 +59,10 @@ struct _KTHREAD
     CLIENT_ID id;
     unsigned int critical_region;
     KAFFINITY user_affinity;
+    LIST_ENTRY ApcListHead[2];
+    CRITICAL_SECTION apc_cs;
+    HANDLE apc_event;
+    HANDLE imposter_thread;
 };
 
 struct _ETHREAD

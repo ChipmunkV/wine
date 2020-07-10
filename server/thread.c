@@ -75,6 +75,7 @@ struct thread_wait
     struct thread          *thread;     /* owner thread */
     int                     count;      /* count of objects */
     int                     flags;
+    int                     in_kernel;  /* we can't timeout when winedevice is working on the thread's behalf */
     int                     abandoned;
     enum select_op          select;
     client_ptr_t            key;        /* wait key for keyed events */
@@ -90,6 +91,7 @@ struct thread_apc
 {
     struct object       obj;      /* object header */
     struct list         entry;    /* queue linked list */
+    struct thread      *callee;   /* thread this apc is queued on */
     struct thread      *caller;   /* thread that queued this apc */
     struct object      *owner;    /* object that queued this apc */
     int                 executed; /* has it been executed by the client? */
@@ -248,6 +250,7 @@ static inline void init_thread_structure( struct thread *thread )
 
     list_init( &thread->mutex_list );
     list_init( &thread->system_apc );
+    list_init( &thread->kernel_apc);
     list_init( &thread->user_apc );
     list_init( &thread->kernel_object );
 
@@ -394,6 +397,7 @@ static void cleanup_thread( struct thread *thread )
         thread->context = NULL;
     }
     clear_apc_queue( &thread->system_apc );
+    clear_apc_queue( &thread->kernel_apc );
     clear_apc_queue( &thread->user_apc );
     free( thread->req_data );
     free( thread->reply_data );
@@ -491,6 +495,7 @@ static int thread_apc_signaled( struct object *obj, struct wait_queue_entry *ent
 static void thread_apc_destroy( struct object *obj )
 {
     struct thread_apc *apc = (struct thread_apc *)obj;
+    if (apc->callee) release_object( apc->callee);
     if (apc->caller) release_object( apc->caller );
     if (apc->owner) release_object( apc->owner );
 }
@@ -504,6 +509,7 @@ static struct thread_apc *create_apc( struct object *owner, const apc_call_t *ca
     {
         apc->call        = *call_data;
         apc->caller      = NULL;
+        apc->callee      = NULL;
         apc->owner       = owner;
         apc->executed    = 0;
         apc->result.type = APC_NONE;
@@ -772,6 +778,7 @@ static int wait_on( const select_op_t *select_op, unsigned int count, struct obj
     wait->user    = NULL;
     wait->when = when;
     wait->abandoned = 0;
+    wait->in_kernel = 0;
     current->wait = wait;
 
     for (i = 0, entry = wait->queues; i < count; i++, entry++)
@@ -819,6 +826,16 @@ static int check_wait( struct thread *thread )
     if ((wait->flags & SELECT_INTERRUPTIBLE) && !list_empty( &thread->system_apc ))
         return STATUS_KERNEL_APC;
 
+    if ((wait->flags & SELECT_INTERRUPTIBLE && !list_empty( &thread->kernel_apc )))
+    {
+        struct thread_apc *apc = LIST_ENTRY( list_head(&thread->kernel_apc), struct thread_apc, entry );
+        assert(apc->call.type == APC_REAL_KERNEL);
+        thread->wait->in_kernel = 1;
+        apc->executed = 1;
+        wake_up( &apc->obj, 0 );
+        return -1;
+    }
+
     /* Suspended threads may not acquire locks, but they can run system APCs */
     if (thread->process->suspend + thread->suspend > 0) return -1;
 
@@ -837,7 +854,19 @@ static int check_wait( struct thread *thread )
             if (entry->obj->ops->signaled( entry->obj, entry )) return i;
     }
 
-    if ((wait->flags & SELECT_ALERTABLE) && !list_empty(&thread->user_apc)) return STATUS_USER_APC;
+    if ((wait->flags & SELECT_ALERTABLE) && !list_empty(&thread->user_apc))
+    {
+        struct thread_apc *apc = LIST_ENTRY( list_head(&thread->user_apc), struct thread_apc, entry );
+        if (apc->call.type != APC_REAL_USER)
+            return STATUS_USER_APC;
+        else
+        {
+            thread->wait->in_kernel = 1;
+            apc->executed = 1;
+            wake_up( &apc->obj, 0 );
+            return -1;
+        }
+    }
     if (wait->when >= 0 && wait->when <= current_time) return STATUS_TIMEOUT;
     if (wait->when < 0 && -wait->when <= monotonic_time) return STATUS_TIMEOUT;
     return -1;
@@ -1021,7 +1050,7 @@ static void select_on( const select_op_t *select_op, data_size_t op_size, client
     }
 
     /* now we need to wait */
-    if (current->wait->when != TIMEOUT_INFINITE)
+    if (current->wait->when != TIMEOUT_INFINITE && !current->wait->in_kernel)
     {
         if (!(current->wait->user = add_timeout_user( abstime_to_timeout(current->wait->when),
                                                       thread_timeout, current->wait )))
@@ -1059,7 +1088,10 @@ static inline struct list *get_apc_queue( struct thread *thread, enum apc_type t
     case APC_NONE:
     case APC_USER:
     case APC_TIMER:
+    case APC_REAL_USER:
         return &thread->user_apc;
+    case APC_REAL_KERNEL:
+        return &thread->kernel_apc;
     default:
         return &thread->system_apc;
     }
@@ -1114,13 +1146,14 @@ static int queue_apc( struct process *process, struct thread *thread, struct thr
         if (thread->state == TERMINATED) return 0;
         queue = get_apc_queue( thread, apc->call.type );
         /* send signal for system APCs if needed */
-        if (queue == &thread->system_apc && list_empty( queue ) && !is_in_apc_wait( thread ))
+        if ((queue == &thread->system_apc || queue == &thread->kernel_apc) && list_empty( queue ) && !is_in_apc_wait( thread ))
         {
             if (!send_thread_signal( thread, SIGUSR1 )) return 0;
         }
         /* cancel a possible previous APC with the same owner */
         if (apc->owner) thread_cancel_apc( thread, apc->owner, apc->call.type );
     }
+    apc->callee = (struct thread *) grab_object( thread );
 
     grab_object( apc );
     list_add_tail( queue, &apc->entry );
@@ -1703,6 +1736,7 @@ DECL_HANDLER(queue_apc)
     struct thread *thread = NULL;
     struct process *process = NULL;
     struct thread_apc *apc;
+    obj_handle_t apc_handle = 0;
 
     if (!(apc = create_apc( NULL, &req->call ))) return;
 
@@ -1710,6 +1744,8 @@ DECL_HANDLER(queue_apc)
     {
     case APC_NONE:
     case APC_USER:
+    case APC_REAL_USER:
+    case APC_REAL_KERNEL:
         thread = get_thread_from_handle( req->handle, THREAD_SET_CONTEXT );
         break;
     case APC_VIRTUAL_ALLOC:
@@ -1748,34 +1784,87 @@ DECL_HANDLER(queue_apc)
         break;
     }
 
-    if (thread)
+    if (!thread && !process)
     {
-        if (!queue_apc( NULL, thread, apc )) set_error( STATUS_THREAD_IS_TERMINATING );
-        release_object( thread );
-    }
-    else if (process)
-    {
-        reply->self = (process == current->process);
-        if (!reply->self)
-        {
-            obj_handle_t handle = alloc_handle( current->process, apc, SYNCHRONIZE, 0 );
-            if (handle)
-            {
-                if (queue_apc( process, NULL, apc ))
-                {
-                    apc->caller = (struct thread *)grab_object( current );
-                    reply->handle = handle;
-                }
-                else
-                {
-                    close_handle( current->process, handle );
-                    set_error( STATUS_PROCESS_IS_TERMINATING );
-                }
-            }
-        }
-        release_object( process );
+        release_object(apc);
+        return;
     }
 
+    apc_handle = alloc_handle( current->process, apc, SYNCHRONIZE, 0 );
+
+    if (apc_handle)
+    {
+        if (process)
+            reply->self = (process == current->process);
+        if (queue_apc( process, thread, apc ))
+        {
+            apc->caller = (struct thread *)grab_object( current );
+            reply->handle = apc_handle;
+        }
+        else
+        {
+            close_handle( current->process, apc_handle );
+            set_error( thread ? STATUS_THREAD_IS_TERMINATING : STATUS_PROCESS_IS_TERMINATING );
+        }
+        release_object( thread ? (void*) thread : (void*) process );
+    }
+
+    /* Optimization: APC_USER and APC_NONE don't use the handle */
+    if (apc->call.type == APC_USER || apc->call.type == APC_NONE)
+        close_handle(current->process, apc_handle);
+
+    release_object( apc );
+}
+
+/* transform the APC object into the type for usermode  */
+DECL_HANDLER(finalize_apc)
+{
+    struct thread_apc *apc;
+    struct list *queue;
+
+    if (!(apc = (struct thread_apc *)get_handle_obj(current->process, req->handle,
+                                                    0, &thread_apc_ops ))) return;
+
+    if (apc->executed != 1)
+    {
+        set_error(STATUS_INVALID_PARAMETER);
+        goto done;
+    }
+
+    if (apc->call.type != APC_REAL_USER && apc->call.type != APC_REAL_KERNEL)
+    {
+        set_error(STATUS_INVALID_PARAMETER);
+        goto done;
+    }
+
+    queue = get_apc_queue(apc->callee, apc->call.type);
+    if (list_head(queue) != &apc->entry)
+    {
+        set_error(STATUS_INVALID_PARAMETER);
+        goto done;
+    }
+
+    apc->executed = 0;
+
+    if (apc->call.type == APC_REAL_KERNEL)
+    {
+        /* dequeue */
+        list_remove(&apc->entry);
+        release_object(apc);
+
+        if (req->call.type != APC_NONE)
+            set_error(STATUS_INVALID_PARAMETER);
+    }
+    else
+        apc->call = req->call;
+
+    if (apc->callee->wait)
+        apc->callee->wait->in_kernel = 0;
+    fprintf(stderr, "finalize APC wakeup %u\n", wake_thread( apc->callee ));
+
+    done:
+    if (get_error() != 0)
+        fprintf(stderr, "APC error %x\n", get_error());
     release_object( apc );
 }
 

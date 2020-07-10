@@ -59,6 +59,7 @@ struct thread
     struct msg_queue      *queue;         /* message queue */
     struct thread_wait    *wait;          /* current wait condition if sleeping */
     struct list            system_apc;    /* queue of system async procedure calls */
+    struct list            kernel_apc;    /* queue of kernel async procedure calls */
     struct list            user_apc;      /* queue of user async procedure calls */
     struct inflight_fd     inflight[MAX_INFLIGHT_FDS];  /* fds currently in flight */
     unsigned int           error;         /* current error code */
