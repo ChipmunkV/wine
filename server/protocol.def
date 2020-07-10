@@ -1008,6 +1008,7 @@ typedef struct
     mod_handle_t base_address; /* base address of module */
 @REPLY
     client_ptr_t entry_point;
+    mod_handle_t base_address;
     data_size_t  filename_len;    /* buffer len in bytes required to store filename */
     VARARG(filename,unicode_str); /* file name of module */
 @END

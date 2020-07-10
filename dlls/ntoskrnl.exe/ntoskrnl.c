@@ -2229,6 +2229,8 @@ NTSTATUS WINAPI FsRtlRegisterUncProvider(PHANDLE MupHandle, PUNICODE_STRING Redi
 static void *create_process_object( HANDLE handle )
 {
     PEPROCESS process;
+    DWORD filename_len = 0;
+    NTSTATUS stat;
 
     if (!(process = alloc_kernel_object( PsProcessType, handle, sizeof(*process), 0 ))) return NULL;
 
@@ -2236,6 +2238,24 @@ static void *create_process_object( HANDLE handle )
     process->header.WaitListHead.Blink = INVALID_HANDLE_VALUE; /* mark as kernel object */
     NtQueryInformationProcess( handle, ProcessBasicInformation, &process->info, sizeof(process->info), NULL );
     IsWow64Process( handle, &process->wow64 );
+
+    SERVER_START_REQ(get_dll_info)
+    {
+        req->handle = wine_server_obj_handle(handle);
+        req->base_address = 0;
+        if (((stat = wine_server_call(req)) == STATUS_BUFFER_TOO_SMALL) || stat == STATUS_SUCCESS)
+        {
+            process->section_base_address = (PVOID) reply->base_address;
+            filename_len = reply->filename_len;
+        }
+        else
+        {
+            ERR("Failed to get base address stat %x\n", stat);
+            process->section_base_address = (PVOID) 0;
+        }
+    }
+    SERVER_END_REQ;
+
     return process;
 }
 

@@ -1610,6 +1610,7 @@ DECL_HANDLER(get_dll_info)
         if (dll)
         {
             reply->entry_point = 0; /* FIXME */
+            reply->base_address = dll->base;
             reply->filename_len = dll->namelen;
             if (dll->filename)
             {
