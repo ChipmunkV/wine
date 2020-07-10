@@ -2230,6 +2230,7 @@ static void *create_process_object( HANDLE handle )
 {
     PEPROCESS process;
     DWORD filename_len = 0;
+    HANDLE process_file = NULL;
     NTSTATUS stat;
 
     if (!(process = alloc_kernel_object( PsProcessType, handle, sizeof(*process), 0 ))) return NULL;
@@ -2255,6 +2256,51 @@ static void *create_process_object( HANDLE handle )
         }
     }
     SERVER_END_REQ;
+
+    if (process->section_base_address)
+    {
+        SERVER_START_REQ(get_mapping_file)
+        {
+            req->addr = wine_server_client_ptr(process->section_base_address);
+            req->process = wine_server_obj_handle(handle);
+            if (!(stat = wine_server_call(req)))
+                process_file = wine_server_ptr_handle(reply->handle);
+        }
+        SERVER_END_REQ;
+
+        if (stat)
+        {
+            PWCHAR filename = HeapAlloc(GetProcessHeap(), 0, filename_len + sizeof(WCHAR));
+            filename[filename_len / sizeof(WCHAR)] = 0;
+
+            WARN("Failed to get file from mapping, address = %p.  Falling back to new handle.\n, stat = %x\n", process->section_base_address, stat);
+
+            SERVER_START_REQ(get_dll_info)
+            {
+                req->handle = wine_server_obj_handle(handle);
+                req->base_address = 0;
+                wine_server_set_reply(req, filename, filename_len);
+                stat = wine_server_call(req);
+            }
+            SERVER_END_REQ;
+
+            if (!stat)
+            {
+                process_file = CreateFileW(filename, 0, FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (!process_file)
+                    ERR("Fallback failed to create handle to exe file. %x\n", GetLastError());
+            }
+            else
+                ERR("Fallback failed to get process exe file name %x\n", stat);
+            HeapFree(GetProcessHeap(), 0, filename);
+        }
+
+        if (process_file)
+        {
+            stat = ObReferenceObjectByHandle(process_file, FILE_GENERIC_READ, IoFileObjectType, KernelMode, (void**) &process->file_object, NULL);
+            CloseHandle(process_file);
+        }
+    }
 
     return process;
 }
@@ -3109,8 +3155,18 @@ NTSTATUS WINAPI PsRemoveLoadImageNotifyRoutine(PLOAD_IMAGE_NOTIFY_ROUTINE routin
  */
 NTSTATUS WINAPI PsReferenceProcessFilePointer(PEPROCESS process, FILE_OBJECT **file)
 {
-    FIXME("%p %p\n", process, file);
-    return STATUS_NOT_IMPLEMENTED;
+    TRACE("%p %p\n", process, file);
+
+    if (!(process->file_object))
+    {
+        FIXME("file object was not found\n");
+        return STATUS_NOT_IMPLEMENTED;
+    }
+
+    ObReferenceObject(process->file_object);
+    *file = process->file_object;
+
+    return STATUS_SUCCESS;
 }
 
 
