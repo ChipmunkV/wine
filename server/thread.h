@@ -126,6 +126,7 @@ extern int is_cpu_supported( enum cpu_type cpu );
 extern unsigned int get_supported_cpu_mask(void);
 extern int suspend_thread( struct thread *thread );
 extern int resume_thread( struct thread *thread );
+extern int is_thread( struct object *obj );
 
 /* ptrace functions */
 

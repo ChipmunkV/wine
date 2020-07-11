@@ -1251,9 +1251,24 @@ DECL_HANDLER(callback_subscribe)
     manager->callback_mask = req->callback_mask;
 }
 
+struct object *get_handle_event_object(krnl_cbdata_t *cb)
+{
+    if (cb->cb_type == SERVER_CALLBACK_HANDLE_EVENT)
+    {
+        struct object *obj;
+        if ((obj = (struct object *) ((unsigned long int) cb->handle_event.object << 32 | cb->handle_event.padding)))
+            return obj;
+    }
+    return NULL;
+}
+
 krnl_cbdata_t grab_cbdata(krnl_cbdata_t *cb)
 {
     krnl_cbdata_t ret = *cb;
+    struct object *obj;
+    if ((obj = get_handle_event_object(cb)))
+        grab_object(obj);
+
     return ret;
 }
 
@@ -1388,6 +1403,19 @@ DECL_HANDLER(get_next_callback_event)
         }
         else
             reply->client_tid = 0;
+        if (reply->cb_data.cb_type == SERVER_CALLBACK_HANDLE_EVENT)
+        {
+            struct object *obj;
+            if ((obj = (struct object *) ((unsigned long int) reply->cb_data.handle_event.object << 32 | reply->cb_data.handle_event.padding)))
+            {
+                is_extending = 1;
+                reply->cb_data.handle_event.object = alloc_handle_no_access_check(current->process, obj, MAXIMUM_ALLOWED, 0);
+                is_extending = 0;
+                release_object(obj);
+            }
+            else
+                reply->cb_data.handle_event.object = 0;
+        }
         if (cb->string_param.str)
         {
             set_reply_data( cb->string_param.str, min( cb->string_param.len, get_reply_max_size() ) );

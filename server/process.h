@@ -133,6 +133,7 @@ extern void kill_console_processes( struct thread *renderer, int exit_code );
 extern void kill_debugged_processes( struct thread *debugger, int exit_code );
 extern void detach_debugged_processes( struct thread *debugger );
 extern void enum_processes( int (*cb)(struct process*, void*), void *user);
+extern int is_process( struct object *obj );
 
 /* console functions */
 extern obj_handle_t inherit_console( struct thread *parent_thread, obj_handle_t handle,

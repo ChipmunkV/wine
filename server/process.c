@@ -1130,6 +1130,11 @@ int set_process_debug_flag( struct process *process, int flag )
     return write_process_memory( process, process->peb + 2, 1, &data );
 }
 
+int is_process( struct object *obj )
+{
+    return obj->ops == &process_ops;
+}
+
 /* create a new process */
 DECL_HANDLER(new_process)
 {

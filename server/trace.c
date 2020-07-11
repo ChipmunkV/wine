@@ -441,6 +441,21 @@ static void dump_krnl_cbdata( const char *prefix, const krnl_cbdata_t *input )
         dump_uint64( ",size=%08x", &input->image_life.size);
         fputc( '}', stderr );
         break;
+    case SERVER_CALLBACK_HANDLE_EVENT:
+        fprintf(stderr, "%s{type=HANDLE_EVENT,op_type=", prefix);
+        switch(input->handle_event.op_type)
+        {
+        case CREATE_PROC: fprintf(stderr, "CREATE_PROC"); break;
+        case DUP_PROC:    fprintf(stderr, "DUP_PROC");    break;
+        case CREATE_THRD: fprintf(stderr, "CREATE_THRD"); break;
+        case DUP_THRD:    fprintf(stderr, "DUP_THRD");    break;
+        default:;
+        }
+        fprintf(stderr, ",access=%04x,status=%04x,object=%04x", input->handle_event.access, input->handle_event.status, input->handle_event.object);
+        if (input->handle_event.op_type == DUP_PROC || input->handle_event.op_type == DUP_THRD)
+            fprintf(stderr, ",source_pid=%04x,target_pid=%04x", input->handle_event.source_pid, input->handle_event.target_pid);
+        fputc( '}', stderr );
+        break;
     }
 }
 

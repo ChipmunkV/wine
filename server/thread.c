@@ -713,6 +713,11 @@ int resume_thread( struct thread *thread )
     return old_count;
 }
 
+int is_thread( struct object *obj )
+{
+    return obj->ops == &thread_ops;
+}
+
 /* add a thread to an object wait queue; return 1 if OK, 0 on error */
 int add_queue( struct object *obj, struct wait_queue_entry *entry )
 {

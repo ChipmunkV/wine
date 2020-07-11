@@ -874,6 +874,7 @@ NTSTATUS callback_subscribe(enum kernel_callback_type type, BOOL unsub)
 
 static void dispatch_process_create_callbacks(const krnl_cbdata_t *data);
 static void dispatch_thread_create_callbacks(const krnl_cbdata_t *data);
+static void dispatch_object_callbacks(const krnl_cbdata_t *data);
 void handle_callback(const krnl_cbdata_t *data, const WCHAR *image_path)
 {
     TRACE("dispatch callback %u\n", data->cb_type);
@@ -883,6 +884,7 @@ void handle_callback(const krnl_cbdata_t *data, const WCHAR *image_path)
     {
         case SERVER_CALLBACK_PROC_LIFE: dispatch_process_create_callbacks(data); break;
         case SERVER_CALLBACK_THRD_LIFE: dispatch_thread_create_callbacks(data); break;
+        case SERVER_CALLBACK_HANDLE_EVENT: dispatch_object_callbacks(data); break;
         default:;
     }
     LeaveCriticalSection(&callback_cs);
@@ -3007,15 +3009,163 @@ void FASTCALL ObfDereferenceObject( void *obj )
     ObDereferenceObject( obj );
 }
 
+static struct list object_callbacks = LIST_INIT( object_callbacks );
+struct object_callback
+{
+    struct list entry;
+    OB_CALLBACK_REGISTRATION routines;
+};
+
+static void dispatch_object_callbacks(const krnl_cbdata_t *data)
+{
+    struct object_callback *cb;
+    OB_OPERATION operation = (data->handle_event.op_type == CREATE_PROC || data->handle_event.op_type == CREATE_THRD) ? OB_OPERATION_HANDLE_CREATE : OB_OPERATION_HANDLE_DUPLICATE;
+    POBJECT_TYPE *object_type = (data->handle_event.op_type == CREATE_PROC || data->handle_event.op_type == DUP_PROC) ? &PsProcessType : &PsThreadType;
+    ACCESS_MASK new_access = data->handle_event.access;
+    PEPROCESS source_process, target_process;
+    NTSTATUS stat;
+    void *object;
+
+    if ((stat = ObReferenceObjectByHandle(wine_server_ptr_handle(data->handle_event.object), 0, *object_type, KernelMode, &object, NULL)) != STATUS_SUCCESS)
+    {
+        ERR("Invalid callback ntstatus=%x\n", stat);
+        CloseHandle(wine_server_ptr_handle(data->handle_event.object));
+        return;
+    }
+    TRACE("object = %p, operation = %u, krnl_handle=%u\n", object, data->handle_event.op_type, data->handle_event.target_pid == GetCurrentProcessId());
+
+    CloseHandle(wine_server_ptr_handle(data->handle_event.object));
+
+    if (operation == OB_OPERATION_HANDLE_DUPLICATE)
+    {
+        if (PsLookupProcessByProcessId((HANDLE)(ULONG_PTR)data->handle_event.source_pid, &source_process) != STATUS_SUCCESS)
+            return;
+        if (PsLookupProcessByProcessId((HANDLE)(ULONG_PTR)data->handle_event.target_pid, &target_process) != STATUS_SUCCESS)
+        {
+            ObDereferenceObject(source_process);
+            return;
+        }
+    }
+
+    LIST_FOR_EACH_ENTRY(cb, &object_callbacks, struct object_callback, entry)
+    {
+        for (unsigned int i = 0; i < cb->routines.OperationRegistrationCount; i++)
+        {
+            OB_OPERATION_REGISTRATION op_reg = cb->routines.OperationRegistration[i];
+            OB_PRE_OPERATION_INFORMATION pre_info;
+            OB_PRE_OPERATION_PARAMETERS pre_params;
+
+            if (op_reg.ObjectType != object_type || !(op_reg.Operations & operation))
+                continue;
+
+            pre_info.Operation = operation;
+            pre_info.u.s.KernelHandle = data->handle_event.target_pid == GetCurrentProcessId();
+            pre_info.Object = object;
+            pre_info.ObjectType = *object_type;
+            pre_info.CallContext = NULL;
+            if (operation == OB_OPERATION_HANDLE_CREATE)
+            {
+                pre_params.CreateHandleInformation.DesiredAccess = new_access;
+                pre_params.CreateHandleInformation.OriginalDesiredAccess = data->handle_event.access;
+            }
+            else
+            {
+                pre_params.DuplicateHandleInformation.DesiredAccess = new_access;
+                pre_params.DuplicateHandleInformation.OriginalDesiredAccess = data->handle_event.access;
+                pre_params.DuplicateHandleInformation.SourceProcess = source_process;
+                pre_params.DuplicateHandleInformation.TargetProcess = target_process;
+            }
+            pre_info.Parameters = &pre_params;
+
+            TRACE( "\1Call PreOperation %p (ctx=%p,info=%p)\n", op_reg.PreOperation, cb->routines.RegistrationContext, &pre_info);
+            op_reg.PreOperation(cb->routines.RegistrationContext, &pre_info);
+            TRACE( "\1Ret  PreOperation %p\n", op_reg.PreOperation);
+
+            if (operation == OB_OPERATION_HANDLE_CREATE)
+                new_access = pre_params.CreateHandleInformation.DesiredAccess;
+            else
+                new_access = pre_params.DuplicateHandleInformation.DesiredAccess;
+
+            if (pre_info.CallContext)
+                FIXME("CallContext not supported\n");
+        }
+    }
+
+    if (new_access != data->handle_event.access)
+        FIXME("Access mask manipulation not supported (%x->%x)\n", data->handle_event.access, new_access);
+
+    LIST_FOR_EACH_ENTRY(cb, &object_callbacks, struct object_callback, entry)
+    {
+        for (unsigned int i = 0; i < cb->routines.OperationRegistrationCount; i++)
+        {
+            OB_OPERATION_REGISTRATION op_reg = cb->routines.OperationRegistration[i];
+            OB_POST_OPERATION_INFORMATION post_info;
+            OB_POST_OPERATION_PARAMETERS post_params;
+
+            if (op_reg.ObjectType != object_type || !(op_reg.Operations & operation))
+                continue;
+
+            post_info.Operation = operation;
+            post_info.u.s.KernelHandle = data->handle_event.target_pid == GetCurrentProcessId();
+            post_info.Object = object;
+            post_info.ObjectType = *object_type;
+            post_info.CallContext = NULL;
+            post_info.ReturnStatus = data->handle_event.status;
+            if (operation == OB_OPERATION_HANDLE_CREATE)
+                post_params.CreateHandleInformation.GrantedAccess = new_access;
+            else
+                post_params.DuplicateHandleInformation.GrantedAccess = new_access;
+            post_info.Parameters = &post_params;
+
+            TRACE( "\1Call PostOperation %p (ctx=%p,info=%p)\n", op_reg.PostOperation, cb->routines.RegistrationContext, &post_info);
+            op_reg.PostOperation(cb->routines.RegistrationContext, &post_info);
+            TRACE( "\1Ret  PostOperation %p\n", op_reg.PostOperation);
+        }
+    }
+
+    ObDereferenceObject(object);
+    if (operation == OB_OPERATION_HANDLE_DUPLICATE)
+    {
+        ObDereferenceObject(source_process);
+        ObDereferenceObject(target_process);
+    }
+}
+
+#define STATUS_FLT_INSTANCE_ALTITUDE_COLLISION 0xC01C0011
+
 /***********************************************************************
  *           ObRegisterCallbacks (NTOSKRNL.EXE.@)
  */
 NTSTATUS WINAPI ObRegisterCallbacks(POB_CALLBACK_REGISTRATION callback, void **handle)
 {
-    FIXME( "callback %p, handle %p.\n", callback, handle );
+    struct object_callback *cb;
 
-    if(handle)
-        *handle = UlongToHandle(0xdeadbeaf);
+    TRACE( "%p %p\n", callback, handle );
+
+    EnterCriticalSection(&callback_cs);
+
+    LIST_FOR_EACH_ENTRY(cb, &object_callbacks, struct object_callback, entry)
+    {
+        if (!(RtlCompareUnicodeString(&cb->routines.Altitude, &callback->Altitude, FALSE)))
+        {
+            TRACE("conflict\n");
+            LeaveCriticalSection(&callback_cs);
+            return STATUS_FLT_INSTANCE_ALTITUDE_COLLISION;
+        }
+    }
+
+    cb = heap_alloc(sizeof(*cb));
+    cb->routines = *callback;
+    cb->routines.OperationRegistration = heap_alloc(sizeof(OB_OPERATION_REGISTRATION) * cb->routines.OperationRegistrationCount);
+    memcpy(cb->routines.OperationRegistration, callback->OperationRegistration, sizeof(OB_OPERATION_REGISTRATION) * cb->routines.OperationRegistrationCount);
+    *handle = cb;
+
+    if (list_empty(&object_callbacks))
+        callback_subscribe(SERVER_CALLBACK_HANDLE_EVENT, FALSE);
+
+    list_add_tail(&object_callbacks, &cb->entry);
+
+    LeaveCriticalSection(&callback_cs);
 
     return STATUS_SUCCESS;
 }
@@ -3025,7 +3175,19 @@ NTSTATUS WINAPI ObRegisterCallbacks(POB_CALLBACK_REGISTRATION callback, void **h
  */
 void WINAPI ObUnRegisterCallbacks(void *handle)
 {
-    FIXME( "stub: %p\n", handle );
+    struct object_callback *cb = (struct object_callback *) handle;
+
+    TRACE( "%p\n", handle );
+
+    EnterCriticalSection(&callback_cs);
+
+    list_remove(&cb->entry);
+    heap_free(cb->routines.OperationRegistration);
+    heap_free(cb);
+    if (list_empty(&object_callbacks))
+        callback_subscribe(SERVER_CALLBACK_HANDLE_EVENT, TRUE);
+
+    LeaveCriticalSection(&callback_cs);
 }
 
 /***********************************************************************
