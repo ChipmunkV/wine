@@ -873,6 +873,7 @@ NTSTATUS callback_subscribe(enum kernel_callback_type type, BOOL unsub)
 }
 
 static void dispatch_process_create_callbacks(const krnl_cbdata_t *data);
+static void dispatch_thread_create_callbacks(const krnl_cbdata_t *data);
 void handle_callback(const krnl_cbdata_t *data, const WCHAR *image_path)
 {
     TRACE("dispatch callback %u\n", data->cb_type);
@@ -881,6 +882,7 @@ void handle_callback(const krnl_cbdata_t *data, const WCHAR *image_path)
     switch(data->cb_type)
     {
         case SERVER_CALLBACK_PROC_LIFE: dispatch_process_create_callbacks(data); break;
+        case SERVER_CALLBACK_THRD_LIFE: dispatch_thread_create_callbacks(data); break;
         default:;
     }
     LeaveCriticalSection(&callback_cs);
@@ -3233,12 +3235,59 @@ NTSTATUS WINAPI PsSetCreateProcessNotifyRoutineEx( PCREATE_PROCESS_NOTIFY_ROUTIN
 }
 
 
+static struct list thread_create_callbacks = LIST_INIT(thread_create_callbacks);
+struct thread_create_callback
+{
+    struct list entry;
+    PCREATE_THREAD_NOTIFY_ROUTINE routine;
+};
+
+void WINAPI KeUnstackDetachProcess(PKAPC_STATE apc_state);
+static void dispatch_thread_create_callbacks(const krnl_cbdata_t *data)
+{
+    struct thread_create_callback *cb;
+    NTSTATUS stat;
+    PEPROCESS new_thread_proc;
+    KAPC_STATE apc_state;
+
+    stat = PsLookupProcessByProcessId(wine_server_ptr_handle(data->process_life.pid), &new_thread_proc);
+    if (!stat)
+        KeStackAttachProcess((KPROCESS*)new_thread_proc, &apc_state);
+    else
+        ERR("Failed to attach to new thread's process. %x\n", stat);
+
+    LIST_FOR_EACH_ENTRY(cb, &thread_create_callbacks, struct thread_create_callback, entry)
+    {
+        TRACE("\1Call CREATE_THREAD_NOTIFY_ROUTINE %p (pid=%x,tid=%x,create=%x)\n", cb->routine, data->thread_life.pid, data->thread_life.tid, data->thread_life.create);
+        cb->routine((HANDLE)(ULONG_PTR)data->thread_life.pid, (HANDLE)(ULONG_PTR)data->thread_life.tid, data->thread_life.create);
+        TRACE("\1Ret  CREATE_THREAD_NOTIFY_ROUTINE %p\n", cb->routine);
+    }
+
+    if (!stat)
+        KeUnstackDetachProcess(&apc_state);
+}
+
 /***********************************************************************
  *           PsSetCreateThreadNotifyRoutine   (NTOSKRNL.EXE.@)
  */
 NTSTATUS WINAPI PsSetCreateThreadNotifyRoutine( PCREATE_THREAD_NOTIFY_ROUTINE NotifyRoutine )
 {
-    FIXME( "stub: %p\n", NotifyRoutine );
+    struct thread_create_callback *cb;
+
+    TRACE( "%p\n", NotifyRoutine );
+
+    EnterCriticalSection(&callback_cs);
+
+    cb = heap_alloc(sizeof(*cb));
+    cb->routine = NotifyRoutine;
+
+    if (list_empty(&thread_create_callbacks))
+        callback_subscribe(SERVER_CALLBACK_THRD_LIFE, FALSE);
+
+    list_add_tail(&thread_create_callbacks, &cb->entry);
+
+    LeaveCriticalSection(&callback_cs);
+
     return STATUS_SUCCESS;
 }
 
@@ -3248,8 +3297,26 @@ NTSTATUS WINAPI PsSetCreateThreadNotifyRoutine( PCREATE_THREAD_NOTIFY_ROUTINE No
  */
 NTSTATUS WINAPI PsRemoveCreateThreadNotifyRoutine( PCREATE_THREAD_NOTIFY_ROUTINE NotifyRoutine )
 {
-    FIXME( "stub: %p\n", NotifyRoutine );
-    return STATUS_SUCCESS;
+    struct thread_create_callback *cb;
+
+    TRACE( "%p\n", NotifyRoutine );
+
+    EnterCriticalSection(&callback_cs);
+
+    LIST_FOR_EACH_ENTRY(cb, &thread_create_callbacks, struct thread_create_callback, entry)
+    {
+        if (cb->routine == NotifyRoutine)
+        {
+            list_remove(&cb->entry);
+            heap_free(cb);
+            if (list_empty(&thread_create_callbacks))
+                callback_subscribe(SERVER_CALLBACK_THRD_LIFE, TRUE);
+            LeaveCriticalSection(&callback_cs);
+            return STATUS_SUCCESS;
+        }
+    }
+    LeaveCriticalSection(&callback_cs);
+    return STATUS_INVALID_PARAMETER;
 }
 
 

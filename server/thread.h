@@ -92,6 +92,7 @@ struct thread
     struct list            kernel_object; /* list of kernel object pointers */
     data_size_t            desc_len;      /* thread description length in bytes */
     WCHAR                 *desc;          /* thread description string */
+    struct object         *callback_init_event;
 };
 
 extern struct thread *current;

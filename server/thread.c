@@ -44,6 +44,7 @@
 #include "windef.h"
 #include "winternl.h"
 
+#include "device.h"
 #include "file.h"
 #include "handle.h"
 #include "process.h"
@@ -244,6 +245,7 @@ static inline void init_thread_structure( struct thread *thread )
     thread->token           = NULL;
     thread->desc            = NULL;
     thread->desc_len        = 0;
+    thread->callback_init_event = NULL;
 
     thread->creation_time = current_time;
     thread->exit_time     = 0;
@@ -298,6 +300,8 @@ struct thread *create_thread( int fd, struct process *process, const struct secu
 {
     struct thread *thread;
     int request_pipe[2];
+    krnl_cbdata_t cbdata;
+    struct object *done_event = NULL;
 
     if (fd == -1)
     {
@@ -361,6 +365,21 @@ struct thread *create_thread( int fd, struct process *process, const struct secu
 
     set_fd_events( thread->request_fd, POLLIN );  /* start listening to events */
     add_process_thread( thread->process, thread );
+
+    cbdata.cb_type = SERVER_CALLBACK_THRD_LIFE;
+    cbdata.thread_life.create = 1;
+    cbdata.thread_life.pid = thread->process->id;
+    cbdata.thread_life.tid = thread->id;
+
+    queue_callback(&cbdata, NULL, &done_event);
+    if (done_event)
+    {
+        if (is_process_init_done(thread->process))
+            thread->callback_init_event = done_event;
+        else
+            release_object(done_event);
+    }
+
     return thread;
 }
 
@@ -404,6 +423,7 @@ static void cleanup_thread( struct thread *thread )
     if (thread->request_fd) release_object( thread->request_fd );
     if (thread->reply_fd) release_object( thread->reply_fd );
     if (thread->wait_fd) release_object( thread->wait_fd );
+    if (thread->callback_init_event) release_object( thread->callback_init_event );
     cleanup_clipboard_thread(thread);
     destroy_thread_windows( thread );
     free_msg_queue( thread );
@@ -1486,6 +1506,13 @@ DECL_HANDLER(init_thread)
         set_thread_affinity( current, current->affinity );
     }
     debug_level = max( debug_level, req->debug_level );
+
+    if (current->callback_init_event)
+    {
+        reply->processed_event = alloc_handle(current->process, current->callback_init_event, SYNCHRONIZE, 0);
+        release_object(current->callback_init_event);
+        current->callback_init_event = NULL;
+    }
 
     reply->pid     = get_process_id( process );
     reply->tid     = get_thread_id( current );

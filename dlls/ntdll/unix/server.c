@@ -1520,6 +1520,7 @@ size_t server_init_thread( void *entry_point, BOOL *suspend )
     struct sigaction sig_act;
     stack_t ss;
     size_t info_size;
+    HANDLE processed_event;
 
     /* ignore SIGPIPE so that we get an EPIPE error instead  */
     sig_act.sa_handler = SIG_IGN;
@@ -1557,8 +1558,16 @@ size_t server_init_thread( void *entry_point, BOOL *suspend )
         server_start_time = reply->server_start;
         server_cpus       = reply->all_cpus;
         *suspend          = reply->suspend;
+        processed_event   = reply->processed_event;
     }
     SERVER_END_REQ;
+
+    if (processed_event)
+    {
+        NtWaitForSingleObject(processed_event, FALSE, NULL);
+        ERR("waited for thread start\n");
+        NtClose(processed_event);
+    }
 
 #ifndef _WIN64
     is_wow64 = (server_cpus & ((1 << CPU_x86_64) | (1 << CPU_ARM64))) != 0;

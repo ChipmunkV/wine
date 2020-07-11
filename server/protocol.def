@@ -897,6 +897,7 @@ typedef struct
     int          version;      /* protocol version */
     unsigned int all_cpus;     /* bitset of supported CPUs */
     int          suspend;      /* is thread suspended? */
+    obj_handle_t processed_event;
 @END
 
 
@@ -3413,7 +3414,7 @@ struct handle_info
     int callback_mask;
 @END
 
-enum operation_type { CREATE_PROC };
+enum operation_type { CREATE_PROC, DUP_PROC, CREATE_THRD, DUP_THRD };
 
 typedef union
 {
@@ -3425,6 +3426,13 @@ typedef union
         process_id_t pid;
         process_id_t ppid;
     } process_life;
+    struct
+    {
+        int cb_type;
+        int create;   /* creation or destruction */
+        process_id_t pid;
+        thread_id_t tid;
+    } thread_life;
     struct
     {
         int cb_type;
@@ -3448,6 +3456,7 @@ typedef union
 enum kernel_callback_type
 {
     SERVER_CALLBACK_PROC_LIFE = 0x1,
+    SERVER_CALLBACK_THRD_LIFE = 0x2,
     SERVER_CALLBACK_IMAGE_LIFE = 0x4,
     SERVER_CALLBACK_HANDLE_EVENT = 0x8
 };
