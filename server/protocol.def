@@ -1038,6 +1038,8 @@ typedef struct
     client_ptr_t name;         /* ptr to ptr to name (in process addr space) */
     data_size_t  dbg_size;     /* debug info size */
     VARARG(filename,unicode_str); /* file name of dll */
+@REPLY
+    obj_handle_t processed_event; /* signals when "kernel" callbacks are done with it */
 @END
 
 
@@ -3414,6 +3416,13 @@ typedef union
     struct
     {
         int cb_type;
+        process_id_t pid;
+        client_ptr_t base;
+        mem_size_t size;
+    } image_life;
+    struct
+    {
+        int cb_type;
         enum operation_type op_type;
         unsigned int access;
         unsigned int status;
@@ -3427,6 +3436,7 @@ typedef union
 enum kernel_callback_type
 {
     SERVER_CALLBACK_PROC_LIFE = 0x1,
+    SERVER_CALLBACK_IMAGE_LIFE = 0x4,
     SERVER_CALLBACK_HANDLE_EVENT = 0x8
 };
 

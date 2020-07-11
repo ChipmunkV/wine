@@ -430,6 +430,13 @@ static void dump_krnl_cbdata( const char *prefix, const krnl_cbdata_t *input )
         fprintf(stderr, "%s{type=PROCESS_%s,pid=%04x,ppid=%04x}",
                 prefix, input->process_life.create ? "CREATE" : "TERMINATE", input->process_life.pid, input->process_life.ppid);
         break;
+    case SERVER_CALLBACK_IMAGE_LIFE:
+        fprintf(stderr, "%s{type=IMAGE_LOAD,pid=%04x",
+                prefix, input->image_life.pid);
+        dump_uint64( ",base=%08x", &input->image_life.base);
+        dump_uint64( ",size=%08x", &input->image_life.size);
+        fputc( '}', stderr );
+        break;
     }
 }
 
