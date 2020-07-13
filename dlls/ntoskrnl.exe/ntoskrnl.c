@@ -3135,6 +3135,18 @@ VOID WINAPI MmUnmapIoSpace( PVOID BaseAddress, SIZE_T NumberOfBytes )
 }
 
 
+PHYSICAL_ADDRESS MmGetPhysicalAddress( PVOID BaseAddress )
+{
+    PHYSICAL_ADDRESS ret;
+
+    FIXME("semi-stub %p, ret = %p\n", BaseAddress, __builtin_return_address(0));
+
+    ret.QuadPart = BaseAddress >= MmSystemRangeStart ? (ULONG_PTR) BaseAddress : (BaseAddress ? 0xdeadbeef : 0x0);
+
+    return ret;
+}
+
+
  /***********************************************************************
  *           ObReferenceObjectByName    (NTOSKRNL.EXE.@)
  */
