@@ -3528,7 +3528,7 @@ NTSTATUS WINAPI PsCreateSystemThread(PHANDLE ThreadHandle, ULONG DesiredAccess,
  */
 HANDLE WINAPI PsGetCurrentProcessId(void)
 {
-    return KeGetCurrentThread()->id.UniqueProcess;
+    return (HANDLE) KeGetCurrentThread()->process->info.UniqueProcessId;
 }
 
 
