@@ -1407,6 +1407,24 @@ static inline void set_sigcontext( const CONTEXT *context, ucontext_t *sigcontex
 }
 
 
+static int ymm_offset = -1;
+static int ymm_length = -1;
+void get_ymm_information(void)
+{
+    int eax = 0x0D, ebx, ecx = 0x02, edx;
+
+    if (ymm_offset != -1)
+        return;
+
+    __asm("cpuid"
+        : "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx)
+        : "0" (eax), "2" (ecx)
+    );
+
+    ymm_offset = ebx;
+    ymm_length = eax;
+}
+
 /***********************************************************************
  *           save_context
  *
@@ -1474,6 +1492,12 @@ static void save_context( struct xcontext *xcontext, const ucontext_t *sigcontex
             assert( xcontext->c_ex.XState.Offset == (BYTE *)xs - (BYTE *)&xcontext->c_ex );
             xcontext->host_compaction_mask = xs->CompactionMask;
         }
+    }
+    get_ymm_information();
+    if (ymm_offset != -1)
+    {
+        memcpy(context->VectorRegister, (BYTE*)sigcontext + ymm_offset, ymm_length);
+        context->ContextFlags |= CONTEXT_XSTATE;
     }
 }
 
@@ -1548,6 +1572,9 @@ static void restore_context( const struct xcontext *xcontext, ucontext_t *sigcon
     if (FPU_sig(sigcontext)) *FPU_sig(sigcontext) = context->u.FltSave;
     if ((xs = XState_sig(FPU_sig(sigcontext))))
         xs->CompactionMask = xcontext->host_compaction_mask;
+    get_ymm_information();
+    if (ymm_offset != -1 && context->ContextFlags & CONTEXT_XSTATE)
+        memcpy((BYTE*)sigcontext + ymm_offset, context->VectorRegister, ymm_length);
 }
 
 
