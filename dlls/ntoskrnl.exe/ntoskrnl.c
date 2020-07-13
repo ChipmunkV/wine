@@ -2638,6 +2638,11 @@ BOOLEAN WINAPI PsGetProcessExitProcessCalled(PEPROCESS process)
     return ret;
 }
 
+PPEB WINAPI PsGetProcessPeb(PEPROCESS process)
+{
+    return process->info.PebBaseAddress;
+}
+
 static void *create_thread_object( HANDLE handle )
 {
     THREAD_BASIC_INFORMATION info;
