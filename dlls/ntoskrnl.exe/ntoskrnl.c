@@ -267,6 +267,31 @@ POBJECT_TYPE WINAPI ObGetObjectType( void *object )
     return header->type;
 }
 
+struct DIRECTORY
+{
+    BYTE test[128];
+};
+
+static struct _OBJECT_TYPE directory_type;
+
+static POBJECT_TYPE DirectoryType = &directory_type;
+
+static void *create_directory_object( HANDLE handle )
+{
+    struct DIRECTORY *dir;
+
+    if (!(dir = alloc_kernel_object( DirectoryType, handle, sizeof(*dir), 0 ))) return NULL;
+
+    return dir;
+}
+
+static const WCHAR directory_type_name[] = {'D','i','r','e','c','t','o','r','y',0};
+
+static struct _OBJECT_TYPE directory_type = {
+    directory_type_name,
+    create_directory_object,
+};
+
 static const POBJECT_TYPE *known_types[] =
 {
     &ExEventObjectType,
@@ -276,7 +301,8 @@ static const POBJECT_TYPE *known_types[] =
     &IoFileObjectType,
     &PsProcessType,
     &PsThreadType,
-    &SeTokenObjectType
+    &SeTokenObjectType,
+    &DirectoryType,
 };
 
 DECLARE_CRITICAL_SECTION(handle_map_cs);
