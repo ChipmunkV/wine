@@ -3806,6 +3806,18 @@ NTSTATUS WINAPI PsReferenceProcessFilePointer(PEPROCESS process, FILE_OBJECT **f
 }
 
 
+PACCESS_TOKEN WINAPI PsReferencePrimaryToken(PEPROCESS process)
+{
+    FIXME("stub %p\n", process);
+    return (PVOID)(ULONG_PTR)0xdeadbeef;
+}
+
+void WINAPI PsDereferencePrimaryToken(PACCESS_TOKEN token)
+{
+    FIXME("stub %p\n", token);
+}
+
+
 /***********************************************************************
  *           PsTerminateSystemThread   (NTOSKRNL.EXE.@)
  */
