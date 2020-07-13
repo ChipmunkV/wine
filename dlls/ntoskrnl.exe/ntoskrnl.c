@@ -2761,17 +2761,17 @@ HANDLE WINAPI PsGetThreadId(PETHREAD thread)
 /*********************************************************************
  *           PsGetThreadProcessId    (NTOSKRNL.@)
  */
-#ifndef __x86_64__
+//#ifndef __x86_64__
 HANDLE WINAPI PsGetThreadProcessId( PETHREAD thread )
 {
     TRACE( "%p -> %p\n", thread, thread->kthread.id.UniqueProcess );
-    return thread->kthread.id.UniqueProcess;
+    return (HANDLE) thread->kthread.process->info.UniqueProcessId;
 }
-#else
-__ASM_GLOBAL_FUNC(PsGetThreadProcessId,
-                  "movq 0x170(%rcx),%rax\n\t"
-                  "ret")
-#endif
+//#else
+//__ASM_GLOBAL_FUNC(PsGetThreadProcessId,
+//                  "movq 0x170(%rcx),%rax\n\t"
+//                  "ret")
+//#endif
 
 /***********************************************************************
  *           KeInsertQueue   (NTOSKRNL.EXE.@)
