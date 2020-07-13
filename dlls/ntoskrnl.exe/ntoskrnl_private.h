@@ -74,6 +74,7 @@ struct _KTHREAD
     HANDLE imposter_thread;
     PVOID user_input_copy, user_output_copy;
     PBYTE user_input, user_output;
+    CHAR more_padding[750];
 };
 
 struct _ETHREAD
