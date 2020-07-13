@@ -4893,6 +4893,126 @@ BOOLEAN WINAPI KdRefreshDebuggerNotPresent(void)
     return !KdDebuggerEnabled;
 }
 
+static SYSTEM_MODULE sysmod_from_ldrmod(LDR_DATA_TABLE_ENTRY *ldr)
+{
+    SYSTEM_MODULE ret = {0};
+    UNICODE_STRING nt_name;
+
+    ret.Section = ldr;
+    ret.MappedBaseAddress = ldr->DllBase;
+    ret.ImageBaseAddress = ldr->DllBase;
+    ret.ImageSize = ldr->SizeOfImage;
+    /* is this right? */
+    ret.Flags = ldr->Flags;
+    ret.LoadOrderIndex = 0;
+    ret.InitOrderIndex = 0;
+    ret.LoadCount = ldr->LoadCount;
+    if (RtlDosPathNameToNtPathName_U(ldr->FullDllName.Buffer, &nt_name, NULL, NULL))
+    {
+        if (!(WideCharToMultiByte(CP_ACP, 0, nt_name.Buffer, nt_name.Length, (CHAR *)ret.Name, 0x100, NULL, NULL)))
+            ret.Name[0] = 0;
+        RtlFreeUnicodeString(&nt_name);
+        ret.NameOffset = strrchr((CHAR *)ret.Name, '\\') - (CHAR *)ret.Name + 1;
+    }
+
+    return ret;
+}
+
+static LDR_DATA_TABLE_ENTRY *get_modref( HMODULE hmod )
+{
+    PLIST_ENTRY mark, entry;
+    PLDR_DATA_TABLE_ENTRY mod;
+
+    mark = &NtCurrentTeb()->Peb->LdrData->InMemoryOrderModuleList;
+    for (entry = mark->Flink; entry != mark; entry = entry->Flink)
+    {
+        mod = CONTAINING_RECORD(entry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks);
+        if (mod->DllBase == hmod)
+            return mod;
+    }
+    return NULL;
+}
+
+
+NTSTATUS WINAPI NtQuerySystemInformation(
+	IN SYSTEM_INFORMATION_CLASS SystemInformationClass,
+	OUT PVOID SystemInformation,
+	IN ULONG Length,
+	OUT PULONG ResultLength)
+{
+    static HMODULE ntdll_mod;
+    static NTSTATUS (WINAPI *pNtQuerySystemInformation)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
+
+    if (!ntdll_mod)
+        ntdll_mod = GetModuleHandleA("ntdll");
+
+    if (!pNtQuerySystemInformation)
+        pNtQuerySystemInformation = (void*) GetProcAddress(ntdll_mod, "NtQuerySystemInformation");
+
+    if (SystemInformationClass == SystemModuleInformation)
+    {
+        struct wine_driver *entry;
+        SYSTEM_MODULE_INFORMATION *mod_info;
+        static LDR_DATA_TABLE_ENTRY *ntoskrnl_ldrmod;
+        SYSTEM_MODULE ntoskrnl_sysmod;
+        ULONG total_size, index = 1;
+
+        TRACE("(0x%08x,%p,0x%08x,%p)\n",
+            SystemInformationClass,SystemInformation,Length,ResultLength);
+
+        if (!SystemInformation)
+            return STATUS_ACCESS_VIOLATION;
+
+        total_size = offsetof(SYSTEM_MODULE_INFORMATION, Modules[1]);
+        mod_info = heap_alloc(total_size);
+
+        if (!ntoskrnl_ldrmod)
+        {
+            HMODULE ntoskrnl_mod = GetModuleHandleA("ntoskrnl.exe");
+            ntoskrnl_ldrmod = get_modref(ntoskrnl_mod);
+        }
+
+        ntoskrnl_sysmod = sysmod_from_ldrmod(ntoskrnl_ldrmod);
+        mod_info->Modules[0] = ntoskrnl_sysmod;
+
+        WINE_RB_FOR_EACH_ENTRY(entry, &wine_drivers, struct wine_driver, entry)
+        {
+            SYSTEM_MODULE mod;
+            LDR_DATA_TABLE_ENTRY *ldr = entry->driver_obj.DriverSection;
+
+            if (!(ldr))
+            {
+                TRACE("driver %s doesn't have section, skipping\n", debugstr_us(&entry->driver_obj.DriverName));
+                continue;
+            }
+
+            mod = sysmod_from_ldrmod(ldr);
+
+            total_size = offsetof(SYSTEM_MODULE_INFORMATION, Modules[index + 1]);
+            mod_info = heap_realloc(mod_info, total_size);
+            mod_info->Modules[index] = mod;
+            index++;
+        }
+        mod_info->ModulesCount = index;
+
+        if (ResultLength)
+            *ResultLength = total_size;
+
+        if (Length < total_size)
+        {
+            heap_free(mod_info);
+            return STATUS_INFO_LENGTH_MISMATCH;
+        }
+
+        memcpy(SystemInformation, mod_info, total_size);
+        heap_free(mod_info);
+
+        return STATUS_SUCCESS;
+    }
+    else
+        return pNtQuerySystemInformation(SystemInformationClass, SystemInformation, Length, ResultLength);
+}
+
 struct generic_call_dpc_context
 {
     DEFERRED_REVERSE_BARRIER *reverse_barrier;
