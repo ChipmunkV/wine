@@ -955,28 +955,23 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
         BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
                                            rex, segprefix, &len );
         unsigned int data_size = (*instr == 0x8b) ? get_op_size( long_op, rex ) : 1;
-        SIZE_T offset = data - user_shared_data;
 
-        if (offset <= KSHARED_USER_DATA_PAGE_SIZE - data_size)
+        BYTE temp[8];
+        if (read_emulated_memory(temp, data, data_size))
         {
-            TRACE("USD offset %#x at %p.\n", (unsigned int)offset, (void *)context->Rip);
             switch (*instr)
             {
                 case 0x8a:
-                    store_reg_byte( context, instr[1], wine_user_shared_data + offset,
-                            rex, INSTR_OP_MOV );
+                    store_reg_byte( context, instr[1], temp, rex, INSTR_OP_MOV );
                     break;
                 case 0x8b:
-                    store_reg_word( context, instr[1], wine_user_shared_data + offset,
-                            long_op, rex, INSTR_OP_MOV );
+                    store_reg_word( context, instr[1], temp, long_op, rex, INSTR_OP_MOV );
                     break;
                 case 0x0b:
-                    store_reg_word( context, instr[1], wine_user_shared_data + offset,
-                            long_op, rex, INSTR_OP_OR );
+                    store_reg_word( context, instr[1], temp, long_op, rex, INSTR_OP_OR );
                     break;
                 case 0x33:
-                    store_reg_word( context, instr[1], wine_user_shared_data + offset,
-                            long_op, rex, INSTR_OP_XOR );
+                    store_reg_word( context, instr[1], temp, long_op, rex, INSTR_OP_XOR );
                     break;
             }
             context->Rip += prefixlen + len + 1;
@@ -990,13 +985,12 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
     {
         BYTE *data = (BYTE *)(long_addr ? *(DWORD64 *)(instr + 1) : *(DWORD *)(instr + 1));
         unsigned int data_size = (*instr == 0xa1) ? get_op_size( long_op, rex ) : 1;
-        SIZE_T offset = data - user_shared_data;
+        BYTE temp[8];
         len = long_addr ? sizeof(DWORD64) : sizeof(DWORD);
 
-        if (offset <= KSHARED_USER_DATA_PAGE_SIZE - data_size)
+        if (read_emulated_memory(temp, data, data_size))
         {
-            TRACE("USD offset %#x at %p.\n", (unsigned int)offset, (void *)context->Rip);
-            memcpy( &context->Rax, wine_user_shared_data + offset, data_size );
+            memcpy( &context->Rax, temp, data_size );
             context->Rip += prefixlen + len + 1;
             return ExceptionContinueExecution;
         }
