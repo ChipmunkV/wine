@@ -2604,6 +2604,23 @@ LONGLONG WINAPI PsGetProcessCreateTimeQuadPart(PEPROCESS process)
     return process->create_time;
 }
 
+BOOL WINAPI PsIsThreadTerminating(PETHREAD thread)
+{
+    HANDLE handle;
+    BOOL ret = FALSE;
+
+    TRACE("%p\n", thread);
+
+    if (!ObOpenObjectByPointer(thread, OBJ_KERNEL_HANDLE, NULL, SYNCHRONIZE, PsThreadType, KernelMode, &handle))
+    {
+        if (WaitForSingleObject(handle, 0) == WAIT_OBJECT_0)
+            ret = TRUE;
+        NtClose(handle);
+    }
+
+    return ret;
+}
+
 static void *create_thread_object( HANDLE handle )
 {
     THREAD_BASIC_INFORMATION info;

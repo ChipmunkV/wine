@@ -926,7 +926,7 @@
 @ stub PsIsProcessBeingDebugged
 @ stdcall PsIsSystemThread(ptr)
 @ stub PsIsThreadImpersonating
-@ stub PsIsThreadTerminating
+@ stdcall PsIsThreadTerminating(ptr)
 @ stub PsJobType
 @ stdcall PsLookupProcessByProcessId(ptr ptr)
 @ stub PsLookupProcessThreadByCid
