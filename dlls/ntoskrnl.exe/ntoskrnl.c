@@ -1357,6 +1357,11 @@ PDEVICE_OBJECT WINAPI IoAttachDeviceToDeviceStack( DEVICE_OBJECT *source,
     return target;
 }
 
+PIRP WINAPI IoGetTopLevelIrp(void)
+{
+    return NULL;
+}
+
 /***********************************************************************
  *           IoBuildDeviceIoControlRequest  (NTOSKRNL.EXE.@)
  */
