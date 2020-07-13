@@ -559,6 +559,29 @@ void forget_kernel_struct(void *obj)
     return;
 }
 
+KSHARED_USER_DATA *wine_user_shared_data = (void *)0x7ffe0000;
+static const BYTE *user_shared_data      = (BYTE *)0xfffff78000000000;
+
+static DWORD64 current_rip;
+
+int read_emulated_memory(void *buf, BYTE *addr, unsigned int length)
+{
+    SIZE_T offset;
+
+    TRACE("(%p, %u)\n", addr, length);
+
+    offset = addr - user_shared_data;
+    if (offset + length <= sizeof(KSHARED_USER_DATA))
+    {
+        WARN("user_shared_data accessed at offset %x @ %016llx\n", offset, current_rip);
+        memcpy(buf, (BYTE *)wine_user_shared_data + offset, length);
+        return 1;
+    }
+
+    ERR("Failed to emulate memory access to %p+%u from %016llx\n", addr, length, current_rip);
+    return 0;
+}
+
 #define REX_B   1
 #define REX_X   2
 #define REX_R   4
@@ -573,10 +596,6 @@ void forget_kernel_struct(void *obj)
 #define SIB_SS( sib, rex )      ((sib) >> 6)
 #define SIB_INDEX( sib, rex )   (((sib) >> 3) & 7) | (((rex) & REX_X) ? 8 : 0)
 #define SIB_BASE( sib, rex )    (((sib) & 7) | (((rex) & REX_B) ? 8 : 0))
-
-/* keep in sync with dlls/ntdll/thread.c:thread_init */
-static const BYTE *wine_user_shared_data = (BYTE *)0x7ffe0000;
-static const BYTE *user_shared_data      = (BYTE *)0xfffff78000000000;
 
 static inline DWORD64 *get_int_reg( CONTEXT *context, int index )
 {
@@ -914,15 +933,12 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
             BYTE *data = INSTR_GetOperandAddr( context, instr + 2, prefixlen + 2, long_addr,
                                                rex, segprefix, &len );
             unsigned int data_size = (instr[1] == 0xb7) ? 2 : 1;
-            SIZE_T offset = data - user_shared_data;
+            BYTE temp[8] = {0};
 
-            if (offset <= KSHARED_USER_DATA_PAGE_SIZE - data_size)
+
+            if (read_emulated_memory(temp, data, data_size))
             {
-                ULONGLONG temp = 0;
-
-                TRACE("USD offset %#x at %p.\n", (unsigned int)offset, (void *)context->Rip);
-                memcpy( &temp, wine_user_shared_data + offset, data_size );
-                store_reg_word( context, instr[2], (BYTE *)&temp, long_op, rex, INSTR_OP_MOV );
+                store_reg_word( context, instr[2], temp, long_op, rex, INSTR_OP_MOV );
                 context->Rip += prefixlen + len + 2;
                 return ExceptionContinueExecution;
             }
