@@ -56,6 +56,15 @@ WINE_DECLARE_DEBUG_CHANNEL(relay);
 BOOLEAN KdDebuggerEnabled = FALSE;
 ULONG InitSafeBootMode = 0;
 USHORT NtBuildNumber = 0;
+#ifdef __x86_64__
+ULONG64 MmUserProbeAddress =         0x00003fffffffefff;
+PVOID MmHighestUserAddress = (PVOID) 0x00003ffffffff000;
+PVOID MmSystemRangeStart   = (PVOID) 0x0000400000000000;
+#else
+DWORD64 MmUserProbeAddress = 0x7fffffff;
+DWORD64 MmHighestUserAddress = 0x7fffffff;
+DWORD64 MmSystemRangeStart = 0x7fffffff;
+#endif
 
 extern LONG CALLBACK vectored_handler( EXCEPTION_POINTERS *ptrs );
 

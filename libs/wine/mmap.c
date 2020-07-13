@@ -44,6 +44,9 @@
 
 #include "wine/list.h"
 
+extern int main_argc;
+extern char **main_argv;
+
 struct reserved_area
 {
     struct list entry;
@@ -55,7 +58,7 @@ static struct list reserved_areas_list = LIST_INIT(reserved_areas_list);
 static struct list free_areas_list = LIST_INIT(free_areas_list);
 
 #ifndef __APPLE__
-static const unsigned int granularity_mask = 0xffff;  /* reserved areas have 64k granularity */
+static const unsigned long int granularity_mask = 0xffff;  /* reserved areas have 64k granularity */
 #endif
 
 #ifndef MAP_NORESERVE
@@ -417,6 +420,7 @@ static inline void reserve_dos_area(void)
 #endif
 
 
+static int stub_wine_mmap_add_reserved_area;
 /***********************************************************************
  *           mmap_init
  */
@@ -482,12 +486,38 @@ void mmap_init(void)
 
 #elif defined(__x86_64__) || defined(__aarch64__)
 
-    if (!list_head( &reserved_areas_list ))
+    if(main_argc >= 1 && !(strcmp(main_argv[1], "C:\\windows\\system32\\winedevice.exe")))
     {
-        /* if we don't have a preloader, try to reserve the space now */
-        reserve_area( (void *)0x000000010000, (void *)0x000068000000 );
-        reserve_area( (void *)0x00007ff00000, (void *)0x00007fff0000 );
-        reserve_area( (void *)0x7ffffe000000, (void *)0x7fffffff0000 );
+        if (!list_head( &reserved_areas_list ))
+            reserve_area( (void *)0x00007ffe0000, (void *)0x00007fff0000 );
+        /* we reserve almost the entire first half of the user address space,
+          and don't remember the reservation so we can't allocate there */
+        stub_wine_mmap_add_reserved_area = 1;
+        reserve_area( (void *)0x000000010000, (void *)0x400000000000);
+        stub_wine_mmap_add_reserved_area = 0;
+
+        /* remove the dos area and low memory area listing */
+        if (list_head( &reserved_areas_list))
+            wine_mmap_remove_reserved_area( (void *)0x10000, 0xF0000, 0 );
+        if (list_head( &reserved_areas_list))
+            wine_mmap_remove_reserved_area( (void *)0x110000, 0x67ef0000, 0 );
+        if (list_head( &reserved_areas_list))
+            wine_mmap_remove_reserved_area( (void *)0x3ffffe000000, 0x1ff0000, 0);
+    }
+    else
+    {
+        if (!list_head( &reserved_areas_list ))
+        {
+            /* if we don't have a preloader, try to reserve the space now */
+            reserve_area( (void *)0x000000010000, (void *)0x000068000000 );
+            reserve_area( (void *)0x00007ff00000, (void *)0x00007fff0000 );
+            reserve_area( (void *)0x3ffffe000000, (void *)0x3fffffff0000 );
+        }
+
+        /* reserve the system space */
+        stub_wine_mmap_add_reserved_area = 1;
+        reserve_area( (void *)0x400000000000, (void *)0x7fffffff0000 );
+        stub_wine_mmap_add_reserved_area = 0;
     }
 
 #endif
@@ -554,6 +584,8 @@ static void wine_mmap_add_area( struct list *areas, void *addr, size_t size )
 
 void wine_mmap_add_reserved_area( void *addr, size_t size )
 {
+    if (stub_wine_mmap_add_reserved_area)
+        return;
     wine_mmap_add_area(&reserved_areas_list, addr, size);
 }
 
@@ -674,7 +706,8 @@ static int wine_mmap_is_in_area( struct list *areas, void *addr, size_t size )
 
 int wine_mmap_is_in_reserved_area( void *addr, size_t size )
 {
-    return wine_mmap_is_in_area( &reserved_areas_list, addr, size );
+    int ret = wine_mmap_is_in_area( &reserved_areas_list, addr, size );
+    return ret;
 }
 
 int wine_mmap_is_in_free_area( void *addr, size_t size )

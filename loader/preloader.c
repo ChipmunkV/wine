@@ -119,8 +119,8 @@ static struct wine_preload_info preload_info[] =
 #else
     { (void *)0x000000010000, 0x00100000 },  /* DOS area */
     { (void *)0x000000110000, 0x67ef0000 },  /* low memory area */
-    { (void *)0x00007ff00000, 0x000f0000 },  /* shared user data */
-    { (void *)0x7ffffe000000, 0x01ff0000 },  /* top-down allocations + virtual heap */
+    { (void *)0x00007ffe0000, 0x10000    },  /* shared user data */
+    { (void *)0x3ffffe000000, 0x01ff0000 },  /* top-down allocations + virtual heap */
 #endif
     { 0, 0 },                            /* PE exe range set with WINEPRELOADRESERVE */
     { 0, 0 }                             /* end of list */

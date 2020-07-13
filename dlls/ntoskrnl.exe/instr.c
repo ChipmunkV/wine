@@ -52,6 +52,8 @@ enum instr_op
     INSTR_OP_XOR,
 };
 
+extern PVOID MmHighestUserAddress;
+
 #ifdef __i386__
 
 WINE_DEFAULT_DEBUG_CHANNEL(int);
