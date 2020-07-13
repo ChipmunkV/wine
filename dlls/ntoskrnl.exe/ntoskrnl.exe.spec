@@ -144,7 +144,7 @@
 @ stdcall ExDeleteResourceLite(ptr)
 @ stub ExDesktopObjectType
 @ stub ExDisableResourceBoostLite
-@ stub ExEnumHandleTable
+@ stdcall ExEnumHandleTable(ptr ptr ptr ptr)
 @ extern ExEventObjectType
 @ stub ExExtendZone
 @ stdcall -fastcall ExfUnblockPushLock(ptr ptr)
