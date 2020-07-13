@@ -50,6 +50,7 @@ struct _EPROCESS
     /* TODO: we should store a section object here instead */
     PFILE_OBJECT file_object;
     PVOID section_base_address;
+    CHAR image_file_name[16];
 };
 
 struct _KTHREAD

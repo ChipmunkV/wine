@@ -2417,6 +2417,8 @@ NTSTATUS WINAPI FsRtlRegisterUncProvider(PHANDLE MupHandle, PUNICODE_STRING Redi
 static void *create_process_object( HANDLE handle )
 {
     PEPROCESS process;
+    CHAR image_path[MAX_PATH];
+    DWORD path_size = MAX_PATH;
     DWORD filename_len = 0;
     HANDLE process_file = NULL;
     HANDLE init_event = NULL;
@@ -2505,6 +2507,13 @@ static void *create_process_object( HANDLE handle )
         }
     }
 
+    memset(process->image_file_name, 0, 16);
+    if(QueryFullProcessImageNameA(handle, 0, image_path, &path_size))
+    {
+        CHAR *image_name = strrchr(image_path, '\\') + 1;
+        lstrcpynA(process->image_file_name, image_name, 15);
+    }
+
     return process;
 }
 
@@ -2563,6 +2572,12 @@ HANDLE WINAPI PsGetProcessInheritedFromUniqueProcessId( PEPROCESS process )
     HANDLE id = (HANDLE)process->info.InheritedFromUniqueProcessId;
     TRACE( "%p -> %p\n", process, id );
     return id;
+}
+
+const char * WINAPI PsGetProcessImageFileName(PEPROCESS process)
+{
+    TRACE("%p -> %p\n", process->image_file_name);
+    return process->image_file_name;
 }
 
 static void *create_thread_object( HANDLE handle )
