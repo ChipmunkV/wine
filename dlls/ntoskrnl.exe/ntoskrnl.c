@@ -3161,6 +3161,8 @@ NTSTATUS WINAPI ObReferenceObjectByName( UNICODE_STRING *ObjectName,
 {
     struct wine_driver *driver;
     struct wine_rb_entry *entry;
+    NTSTATUS stat;
+    HANDLE handle;
 
     TRACE("mostly-stub:%s %i %p %i %p %i %p %p\n", debugstr_us(ObjectName),
         Attributes, AccessState, DesiredAccess, ObjectType, AccessMode,
@@ -3169,7 +3171,6 @@ NTSTATUS WINAPI ObReferenceObjectByName( UNICODE_STRING *ObjectName,
     if (AccessState) FIXME("Unhandled AccessState\n");
     if (DesiredAccess) FIXME("Unhandled DesiredAccess\n");
     if (ParseContext) FIXME("Unhandled ParseContext\n");
-    if (ObjectType) FIXME("Unhandled ObjectType\n");
 
     if (AccessMode != KernelMode)
     {
@@ -3180,15 +3181,35 @@ NTSTATUS WINAPI ObReferenceObjectByName( UNICODE_STRING *ObjectName,
     EnterCriticalSection(&drivers_cs);
     entry = wine_rb_get(&wine_drivers, ObjectName);
     LeaveCriticalSection(&drivers_cs);
-    if (!entry)
+    if (entry)
     {
-        FIXME("Object (%s) not found, may not be tracked.\n", debugstr_us(ObjectName));
-        return STATUS_NOT_IMPLEMENTED;
+        driver = WINE_RB_ENTRY_VALUE(entry, struct wine_driver, entry);
+        ObReferenceObject( *Object = &driver->driver_obj );
+        return STATUS_SUCCESS;
     }
 
-    driver = WINE_RB_ENTRY_VALUE(entry, struct wine_driver, entry);
-    ObReferenceObject( *Object = &driver->driver_obj );
-    return STATUS_SUCCESS;
+    SERVER_START_REQ(open_handle)
+    {
+        req->access = 0;
+        req->attributes = Attributes;
+        req->rootdir = wine_server_obj_handle( 0 );
+        wine_server_add_data(req, ObjectName->Buffer, ObjectName->Length);
+        stat = wine_server_call( req );
+        handle = wine_server_ptr_handle( reply->handle );
+    }
+    SERVER_END_REQ;
+
+    if (stat)
+        return stat;
+
+    stat = kernel_object_from_handle(handle, ObjectType, Object);
+    CloseHandle(handle);
+    if (stat)
+        return stat;
+
+    ObReferenceObject(*Object);
+
+    return stat;
 }
 
 

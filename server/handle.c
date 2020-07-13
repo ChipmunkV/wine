@@ -720,6 +720,15 @@ unsigned int get_handle_table_count( struct process *process )
     return process->handles->count;
 }
 
+/* open a handle */
+DECL_HANDLER(open_handle)
+{
+    struct unicode_str name = get_req_unicode_str();
+
+    reply->handle = open_object( current->process, req->rootdir, req->access,
+                                NULL, &name, req->attributes );
+}
+
 /* close a handle */
 DECL_HANDLER(close_handle)
 {

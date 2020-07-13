@@ -1104,6 +1104,16 @@ typedef struct
 
 #define KERNEL_HANDLE_FLAG 0x8000000
 
+/* Open any object */
+@REQ(open_handle)
+    unsigned int   access;        /* access flags */
+    unsigned int   attributes;    /* object attributes */
+    obj_handle_t   rootdir;       /* root directory */
+    VARARG(object_name,unicode_str); /* Object name */
+@REPLY
+    obj_handle_t   handle;        /* handle to the directory */
+@END
+
 
 /* Close a handle for the current process */
 @REQ(close_handle)
