@@ -178,9 +178,9 @@
 @ stub ExNotifyCallback
 @ stub ExQueryPoolBlockSize
 @ stub ExQueueWorkItem
-@ stub ExRaiseAccessViolation
-@ stub ExRaiseDatatypeMisalignment
-@ stub ExRaiseException
+@ stdcall ExRaiseAccessViolation()
+@ stdcall ExRaiseDatatypeMisalignment()
+@ stdcall ExRaiseException(ptr)
 @ stub ExRaiseHardError
 @ stub ExRaiseStatus
 @ stdcall ExRegisterCallback(ptr ptr ptr)

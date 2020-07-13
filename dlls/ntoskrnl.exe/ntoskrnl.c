@@ -5013,6 +5013,23 @@ NTSTATUS WINAPI NtQuerySystemInformation(
         return pNtQuerySystemInformation(SystemInformationClass, SystemInformation, Length, ResultLength);
 }
 
+void WINAPI ExRaiseException(PEXCEPTION_RECORD record)
+{
+    TRACE("(%p) caller=%p\n", record, __builtin_return_address(0));
+    RtlRaiseException(record);
+}
+
+void WINAPI ExRaiseAccessViolation(void)
+{
+    TRACE("caller=%p\n", __builtin_return_address(0));
+    RtlRaiseStatus(STATUS_ACCESS_VIOLATION);
+}
+
+void WINAPI ExRaiseDatatypeMisalignment(void)
+{
+    FIXME("stub! caller=%p\n", __builtin_return_address(0));
+}
+
 struct generic_call_dpc_context
 {
     DEFERRED_REVERSE_BARRIER *reverse_barrier;
