@@ -1,8 +1,8 @@
 @ stdcall -arch=!i386 ExAcquireFastMutex(ptr)
 @ stdcall -fastcall ExAcquireFastMutexUnsafe(ptr)
-@ stub ExAcquireRundownProtection
+@ stdcall ExAcquireRundownProtection(ptr)
 @ stub ExAcquireRundownProtectionEx
-@ stub ExInitializeRundownProtection
+@ stub ExInitializeRundownProtection(ptr)
 @ stub ExInterlockedAddLargeStatistic
 @ stub ExInterlockedCompareExchange64
 @ stdcall -fastcall -arch=i386 ExInterlockedFlushSList(ptr) NTOSKRNL_ExInterlockedFlushSList
@@ -12,7 +12,7 @@
 @ stdcall -arch=!i386 ExReleaseFastMutex(ptr)
 @ stdcall -fastcall ExReleaseFastMutexUnsafe(ptr)
 @ stdcall -fastcall ExReleaseResourceLite(ptr)
-@ stub ExReleaseRundownProtection
+@ stdcall ExReleaseRundownProtection(ptr)
 @ stub ExReleaseRundownProtectionEx
 @ stub ExRundownCompleted
 @ stub ExWaitForRundownProtectionRelease
