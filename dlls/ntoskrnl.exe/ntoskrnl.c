@@ -5030,6 +5030,11 @@ void WINAPI ExRaiseDatatypeMisalignment(void)
     FIXME("stub! caller=%p\n", __builtin_return_address(0));
 }
 
+PVOID WINAPI PsGetProcessDebugPort(PEPROCESS process)
+{
+    return NULL;
+}
+
 struct generic_call_dpc_context
 {
     DEFERRED_REVERSE_BARRIER *reverse_barrier;
