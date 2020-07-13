@@ -4692,6 +4692,63 @@ NTSTATUS WINAPI SeQueryInformationToken(PACCESS_TOKEN token, TOKEN_INFORMATION_C
     return STATUS_NOT_IMPLEMENTED;
 }
 
+typedef enum _SE_IMAGE_TYPE {
+  SeImageTypeElamDriver,
+  SeImageTypeDriver,
+  SeImageTypePlatformSecureFile,
+  SeImageTypeDynamicCodeFile,
+  SeImageTypeMax
+} SE_IMAGE_TYPE, *PSE_IMAGE_TYPE;
+
+typedef enum _SE_IMAGE_VERIFICATION_CALLBACK_TYPE {
+    SeImageVerificationCallbackInformational = 0
+} SE_IMAGE_VERIFICATION_CALLBACK_TYPE, *PSE_IMAGE_VERIFICATION_CALLBACK_TYPE;
+
+typedef enum _BDCB_CLASSIFICATION {
+  BdCbClassificationUnknownImage,
+  BdCbClassificationKnownGoodImage,
+  BdCbClassificationKnownBadImage,
+  BdCbClassificationKnownBadImageBootCritical,
+  BdCbClassificationEnd
+} BDCB_CLASSIFICATION, *PBDCB_CLASSIFICATION;
+
+typedef struct _BDCB_IMAGE_INFORMATION {
+  BDCB_CLASSIFICATION Classification;
+  ULONG               ImageFlags;
+  UNICODE_STRING      ImageName;
+  UNICODE_STRING      RegistryPath;
+  UNICODE_STRING      CertificatePublisher;
+  UNICODE_STRING      CertificateIssuer;
+  PVOID               ImageHash;
+  PVOID               CertificateThumbprint;
+  ULONG               ImageHashAlgorithm;
+  ULONG               ThumbprintHashAlgorithm;
+  ULONG               ImageHashLength;
+  ULONG               CertificateThumbprintLength;
+} BDCB_IMAGE_INFORMATION, *PBDCB_IMAGE_INFORMATION;
+
+typedef VOID(*PSE_IMAGE_VERIFICATION_CALLBACK_FUNCTION) (
+	PVOID CallbackContext,
+	SE_IMAGE_TYPE ImageType,
+	PBDCB_IMAGE_INFORMATION ImageInformation);
+
+typedef PVOID SE_IMAGE_VERIFICATION_CALLBACK_TOKEN, *PSE_IMAGE_VERIFICATION_CALLBACK_TOKEN;
+
+NTSTATUS SeRegisterImageVerificationCallback( SE_IMAGE_TYPE ImageType, SE_IMAGE_VERIFICATION_CALLBACK_TYPE CallbackType,
+                                              PSE_IMAGE_VERIFICATION_CALLBACK_FUNCTION CallbackFunction, PVOID CallbackContext,
+	                                          SE_IMAGE_VERIFICATION_CALLBACK_TOKEN Token,
+	                                          PVOID* CallbackHandle)
+{
+    FIXME("stub (%u %u %p %p %p %p)\n", ImageType, CallbackType, CallbackFunction, CallbackContext, Token, CallbackHandle);
+    *CallbackHandle = (PVOID)(ULONG_PTR)0xdeadbeef;
+    return STATUS_SUCCESS;
+}
+
+VOID SeUnregisterImageVerificationCallback(PVOID CallbackHandle)
+{
+    FIXME("stub (%p)\n", CallbackHandle);
+}
+
 /*********************************************************************
  *           KeFlushQueuedDpcs    (NTOSKRNL.@)
  */

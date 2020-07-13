@@ -1358,6 +1358,8 @@
 @ stub SeUnlockSubjectContext
 @ stub SeUnregisterLogonSessionTerminatedRoutine
 @ stub SeValidSecurityDescriptor
+@ stdcall SeRegisterImageVerificationCallback(long long ptr ptr long ptr)
+@ stdcall SeUnregisterImageVerificationCallback(ptr)
 @ stdcall -ret64 VerSetConditionMask(int64 long long)
 @ stub VfFailDeviceNode
 @ stub VfFailDriver
