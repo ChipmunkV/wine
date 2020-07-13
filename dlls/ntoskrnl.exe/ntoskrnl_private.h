@@ -97,6 +97,9 @@ void pnp_manager_enumerate_root_devices( const WCHAR *driver_name ) DECLSPEC_HID
 void pnp_manager_start(void) DECLSPEC_HIDDEN;
 void pnp_manager_stop(void) DECLSPEC_HIDDEN;
 
+void disk_driver_start(void) DECLSPEC_HIDDEN;
+void disk_driver_stop(void) DECLSPEC_HIDDEN;
+
 static const WCHAR servicesW[] = {'\\','R','e','g','i','s','t','r','y',
                                   '\\','M','a','c','h','i','n','e',
                                   '\\','S','y','s','t','e','m',

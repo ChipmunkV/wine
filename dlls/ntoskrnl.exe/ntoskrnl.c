@@ -939,6 +939,7 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
     request_thread = GetCurrentThreadId();
 
     pnp_manager_start();
+    disk_driver_start();
 
     handles[0] = stop_event;
     handles[1] = manager;
@@ -1031,6 +1032,7 @@ done:
     /* Native PnP drivers expect that all of their devices will be removed when
      * their unload routine is called, so we must stop the PnP manager first. */
     pnp_manager_stop();
+    disk_driver_stop();
     wine_rb_destroy( &wine_drivers, unload_driver, NULL );
     return status;
 }

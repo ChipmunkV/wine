@@ -6,6 +6,7 @@ DELAYIMPORTS = rpcrt4 setupapi
 EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
+	disk.c \
 	instr.c \
 	ntoskrnl.c \
 	pnp.c \
