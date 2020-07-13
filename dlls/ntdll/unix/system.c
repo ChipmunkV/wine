@@ -2549,6 +2549,30 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         break;
     }
 
+    case SystemBigPoolInformation:
+    {
+        typedef struct _SYSTEM_BITPOOL_INFORMATION
+        {
+            ULONG Count;
+        } SYSTEM_BIGPOOL_INFORMATION;
+
+        SYSTEM_BIGPOOL_INFORMATION sbpi;
+        sbpi.Count = 0;
+
+        len = sizeof(sbpi);
+
+        if (size >= len)
+        {
+            if (!info) ret = STATUS_ACCESS_VIOLATION;
+            else
+            {
+                memcpy( info, &sbpi, len);
+            }
+        }
+        else ret = STATUS_INFO_LENGTH_MISMATCH;
+        break;
+    }
+
     case SystemTimeZoneInformation:
     {
         RTL_DYNAMIC_TIME_ZONE_INFORMATION tz;
