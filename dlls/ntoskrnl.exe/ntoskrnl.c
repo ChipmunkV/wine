@@ -54,6 +54,7 @@ WINE_DEFAULT_DEBUG_CHANNEL(ntoskrnl);
 WINE_DECLARE_DEBUG_CHANNEL(relay);
 
 BOOLEAN KdDebuggerEnabled = FALSE;
+BOOLEAN KdDebuggerNotPresent = TRUE;
 ULONG InitSafeBootMode = 0;
 USHORT NtBuildNumber = 0;
 #ifdef __x86_64__

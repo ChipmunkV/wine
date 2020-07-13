@@ -514,7 +514,7 @@
 @ stub IoWritePartitionTableEx
 @ stub IoWriteTransferCount
 @ extern KdDebuggerEnabled
-@ stub KdDebuggerNotPresent
+@ extern KdDebuggerNotPresent
 @ stub KdDisableDebugger
 @ stub KdEnableDebugger
 @ stub KdEnteredDebugger
