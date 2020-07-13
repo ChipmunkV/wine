@@ -24,6 +24,7 @@
 #include <stdarg.h>
 
 #define NONAMELESSUNION
+#define NONAMELESSSTRUCT
 #include "windef.h"
 #include "winbase.h"
 #include "winternl.h"
@@ -608,6 +609,39 @@ int read_emulated_memory(void *buf, BYTE *addr, unsigned int length)
         return 1;
     }
 
+    /* Then look through struct mappings */
+    if ((kernel_struct = get_kernel_struct(addr)))
+    {
+        offset = addr - kernel_struct->base;
+        if (offset + length <= kernel_struct->size)
+        {
+            if (kernel_struct->callback)
+                kernel_struct->callback(TO_USER(kernel_struct->base), offset, 0, (void *)current_rip);
+            memcpy(buf, TO_USER(kernel_struct->base) + offset, length);
+            return 1;
+        }
+    }
+
+    if (current_process && addr <= (PBYTE)MmHighestUserAddress)
+    {
+        if (current_process->info.UniqueProcessId != GetCurrentProcessId())
+        {
+            HANDLE process;
+            WARN("Emulating access to arbitrary user space process memory (%p, %u) from %016llx\n", addr, length, current_rip);
+            if ((process = OpenProcess(PROCESS_VM_READ, FALSE, (DWORD)(ULONG_PTR) current_process->info.UniqueProcessId)))
+            {
+                BOOL ret = ReadProcessMemory(process, addr, buf, length, NULL);
+                CloseHandle(process);
+                if (!ret)
+                    ERR("Failed to read memory from process. %u\n", GetLastError());
+                return ret;
+            }
+            else
+                goto fail;
+        }
+    }
+
+    fail:
     ERR("Failed to emulate memory access to %p+%u from %016llx\n", addr, length, current_rip);
     return 0;
     done:
@@ -672,6 +706,24 @@ int write_emulated_memory(BYTE *addr, void *buf, unsigned int length)
         }
     }
 
+    if (current_process && addr <= (PBYTE)MmHighestUserAddress)
+    {
+        if (current_process->info.UniqueProcessId != GetCurrentProcessId())
+        {
+            HANDLE process;
+            WARN("arbitrary user space process memory access (%p, %u) from %016llx\n", addr, length, current_rip);
+            if ((process = OpenProcess(PROCESS_VM_WRITE, FALSE, (DWORD)(ULONG_PTR) current_process->info.UniqueProcessId)))
+            {
+                BOOL ret = WriteProcessMemory(process, addr, buf, length, NULL);
+                CloseHandle(process);
+                return ret;
+            }
+            else
+                goto fail;
+        }
+    }
+
+    fail:
     ERR("Failed to emulate memory access to %p+%u\n", addr, length);
     return 0;
     done:
