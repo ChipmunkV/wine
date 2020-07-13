@@ -1,0 +1,5 @@
+MODULE = dllhost.exe
+
+EXTRADLLFLAGS = -mconsole -municode -mno-cygwin
+
+C_SRCS = dllhost.c
