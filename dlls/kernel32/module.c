@@ -280,22 +280,16 @@ BOOL WINAPI GetBinaryTypeA( LPCSTR lpApplicationName, LPDWORD lpBinaryType )
  */
 FARPROC get_proc_address( HMODULE hModule, LPCSTR function )
 {
-    FARPROC     fp;
-
-    if (!hModule) hModule = NtCurrentTeb()->Peb->ImageBaseAddress;
-
-    if ((ULONG_PTR)function >> 16)
+    static WINAPI FARPROC (*kernelbase_GetProcAddress)(HMODULE, LPCSTR);
+    if (!kernelbase_GetProcAddress)
     {
-        ANSI_STRING     str;
-
-        RtlInitAnsiString( &str, function );
-        if (!set_ntstatus( LdrGetProcedureAddress( hModule, &str, 0, (void**)&fp ))) return NULL;
+        ANSI_STRING GetProcAddress_as;
+        HMODULE kernelbase_mod = GetModuleHandleA("kernelbase");
+        RtlInitAnsiString(&GetProcAddress_as, "GetProcAddress");
+        LdrGetProcedureAddress(kernelbase_mod, &GetProcAddress_as, 0, (void**) &kernelbase_GetProcAddress);
     }
-    else
-        if (!set_ntstatus( LdrGetProcedureAddress( hModule, NULL, LOWORD(function), (void**)&fp )))
-            return NULL;
 
-    return fp;
+    return kernelbase_GetProcAddress(hModule, function);
 }
 
 #ifdef __x86_64__
