@@ -921,7 +921,10 @@ static int enum_handles( struct process *process, void *user )
 
     for (i = 0, entry = table->entries; i <= table->last; i++, entry++)
     {
+        client_ptr_t object_ptr = 0;
         if (!entry->ptr) continue;
+        if (current->process->dev_mgr && !(object_ptr = get_kernel_object_ptr(current->process->dev_mgr, entry->ptr)))
+            continue;
         if (!info->handle)
         {
             info->count++;
@@ -932,6 +935,8 @@ static int enum_handles( struct process *process, void *user )
         handle->owner  = process->id;
         handle->handle = index_to_handle(i);
         handle->access = entry->access & ~RESERVED_ALL;
+        handle->object = object_ptr;
+
         info->count--;
     }
 
