@@ -4584,7 +4584,9 @@ NTSTATUS WINAPI DbgQueryDebugFilterState(ULONG component, ULONG level)
  */
 PVOID WINAPI PsGetProcessWow64Process(PEPROCESS process)
 {
-    FIXME("stub: %p\n", process);
+    TRACE("%p\n", process);
+    if (process->wow64)
+        return process->info.PebBaseAddress;
     return NULL;
 }
 
