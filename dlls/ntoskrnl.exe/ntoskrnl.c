@@ -2621,6 +2621,23 @@ BOOL WINAPI PsIsThreadTerminating(PETHREAD thread)
     return ret;
 }
 
+BOOLEAN WINAPI PsGetProcessExitProcessCalled(PEPROCESS process)
+{
+    HANDLE handle;
+    BOOL ret = FALSE;
+
+    TRACE("%p\n", process);
+
+    if (!ObOpenObjectByPointer(process, OBJ_KERNEL_HANDLE, NULL, SYNCHRONIZE, PsProcessType, KernelMode, &handle))
+    {
+        if (WaitForSingleObject(handle, 0) == WAIT_OBJECT_0)
+            ret = TRUE;
+        NtClose(handle);
+    }
+
+    return ret;
+}
+
 static void *create_thread_object( HANDLE handle )
 {
     THREAD_BASIC_INFORMATION info;

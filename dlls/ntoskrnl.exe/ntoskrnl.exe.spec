@@ -897,7 +897,7 @@
 @ stub PsGetJobUIRestrictionsClass
 @ stdcall PsGetProcessCreateTimeQuadPart(ptr)
 @ stub PsGetProcessDebugPort
-@ stub PsGetProcessExitProcessCalled
+@ stdcall PsGetProcessExitProcessCalled(ptr)
 @ stub PsGetProcessExitStatus
 @ stub PsGetProcessExitTime
 @ stdcall PsGetProcessId(ptr)
