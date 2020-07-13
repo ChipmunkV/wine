@@ -2700,6 +2700,32 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         break;
     }
 
+    case SystemCodeIntegrityInformation:
+    {
+        SYSTEM_CODEINTEGRITY_INFORMATION *sci = (SYSTEM_CODEINTEGRITY_INFORMATION*)info;
+        len = sizeof(*sci);
+        if (size < len)
+        {
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+            break;
+        }
+        if (!info)
+        {
+            ret = STATUS_ACCESS_VIOLATION;
+            break;
+        }
+        if (sci->Length < len)
+        {
+            ret = STATUS_INFO_LENGTH_MISMATCH;
+            break;
+        }
+
+        sci->Length = len;
+        sci->CodeIntegrityOptions = 0x1;
+
+        break;
+    }
+
     case SystemExtendedProcessInformation:
         FIXME("SystemExtendedProcessInformation, size %u, info %p, stub!\n", size, info);
         memset( info, 0, size );
