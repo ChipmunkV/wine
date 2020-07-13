@@ -3470,6 +3470,12 @@ enum kernel_callback_type
     VARARG(string_paramenter,unicode_str); /* type defined meaning */
 @END
 
+@REQ(attach_process)
+    obj_handle_t manager;
+    client_ptr_t process;
+    int detach;
+@END
+
 /* Make the current process a system process */
 @REQ(make_process_system)
 @REPLY

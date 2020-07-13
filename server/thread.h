@@ -93,6 +93,7 @@ struct thread
     data_size_t            desc_len;      /* thread description length in bytes */
     WCHAR                 *desc;          /* thread description string */
     struct object         *callback_init_event;
+    struct process *       attached_process;
 };
 
 extern struct thread *current;

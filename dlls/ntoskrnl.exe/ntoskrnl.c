@@ -4706,12 +4706,47 @@ void * WINAPI PsGetProcessSectionBaseAddress(PEPROCESS process)
 
 void WINAPI KeStackAttachProcess(KPROCESS *process, KAPC_STATE *apc_state)
 {
-    FIXME("process %p, apc_state %p stub.\n", process, apc_state);
+    PKTHREAD thread = KeGetCurrentThread();
+    NTSTATUS stat;
+
+    TRACE("%p %p\n", process, apc_state);
+
+    apc_state->Process = thread->process;
+    thread->process = process;
+
+    SERVER_START_REQ(attach_process)
+    {
+        req->manager = wine_server_obj_handle(get_device_manager());
+        req->detach = 0;
+        req->process = wine_server_client_ptr(process);
+        stat = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+
+    if (stat)
+        ERR("%x\n", stat);
 }
 
 void WINAPI KeUnstackDetachProcess(KAPC_STATE *apc_state)
 {
-    FIXME("apc_state %p stub.\n", apc_state);
+    PKTHREAD thread = KeGetCurrentThread();
+    NTSTATUS stat;
+
+    TRACE("%p\n", apc_state);
+
+    thread->process = apc_state->Process;
+
+    SERVER_START_REQ(attach_process)
+    {
+        req->manager = wine_server_obj_handle(get_device_manager());
+        req->detach = 1;
+        req->process = wine_server_client_ptr(apc_state->Process);
+        stat = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+
+    if (stat)
+        ERR("%x\n", stat);
 }
 
 /*****************************************************

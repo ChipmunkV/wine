@@ -1052,6 +1052,12 @@ DECL_HANDLER(get_next_device_request)
                                                              0, &device_manager_ops )))
         return;
 
+    if (current->attached_process)
+    {
+        release_object(current->attached_process);
+        current->attached_process = NULL;
+    }
+
     if (manager->current_cb_event)
     {
         manager->current_cb_event->remaining_count--;
@@ -1376,6 +1382,12 @@ DECL_HANDLER(get_next_callback_event)
                                                              0, &device_manager_ops )))
         return;
 
+    if (current->attached_process)
+    {
+        release_object(current->attached_process);
+        current->attached_process = NULL;
+    }
+
     if ((ptr = list_head( &manager->callbacks )))
     {
         struct callback_entry *cb = LIST_ENTRY( ptr, struct callback_entry, entry );
@@ -1428,4 +1440,62 @@ DECL_HANDLER(get_next_callback_event)
     else set_error( STATUS_PENDING );
 
     release_object( manager );
+}
+
+static struct thread *device_manager_client_thread(struct device_manager *dev_mgr, struct thread *thread)
+{
+    if (thread != dev_mgr->main_loop_thread)
+        return NULL;
+    return dev_mgr->current_call ? (struct thread *)grab_object((struct object *) dev_mgr->current_call->thread) :
+           dev_mgr->current_cb_client ?(struct thread *)grab_object((struct object *) dev_mgr->current_cb_client) :  NULL;
+}
+
+DECL_HANDLER(attach_process)
+{
+    struct device_manager *manager;
+    struct process *process;
+    struct kernel_object *ref;
+    struct thread *client_thread;
+    struct process *current_process;
+
+    if (!(manager = (struct device_manager *)get_handle_obj( current->process, req->manager,
+                                                             0, &device_manager_ops )))
+        return;
+
+    if ((client_thread = device_manager_client_thread(manager, current)))\
+    {
+        current_process = client_thread->process;
+        release_object(client_thread);
+    }
+    else
+        current_process = current->process;
+
+    if (!(ref = kernel_object_from_ptr( manager, req->process )))
+    {
+        set_error( STATUS_INVALID_PARAMETER );
+        release_object(manager);
+        return;
+    }
+
+    process = (struct process *)ref->object;
+    release_object(manager);
+
+    if (!(is_process(&process->obj)))
+    {
+        set_error( STATUS_OBJECT_TYPE_MISMATCH );
+        return;
+    }
+
+    grab_object(process);
+
+    if (current->attached_process)
+    {
+        release_object(current->attached_process);
+        current->attached_process = NULL;
+    }
+
+    if (req->detach && process == current_process)
+        release_object(process);
+    else
+        current->attached_process = process;
 }
