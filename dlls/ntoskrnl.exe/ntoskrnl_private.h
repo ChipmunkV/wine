@@ -51,6 +51,7 @@ struct _EPROCESS
     PFILE_OBJECT file_object;
     PVOID section_base_address;
     CHAR image_file_name[16];
+    LONGLONG create_time;
 };
 
 struct _KTHREAD

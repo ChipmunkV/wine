@@ -2420,6 +2420,7 @@ static void *create_process_object( HANDLE handle )
     CHAR image_path[MAX_PATH];
     DWORD path_size = MAX_PATH;
     DWORD filename_len = 0;
+    KERNEL_USER_TIMES times;
     HANDLE process_file = NULL;
     HANDLE init_event = NULL;
     NTSTATUS stat;
@@ -2444,6 +2445,11 @@ static void *create_process_object( HANDLE handle )
     process->header.WaitListHead.Blink = INVALID_HANDLE_VALUE; /* mark as kernel object */
     NtQueryInformationProcess( handle, ProcessBasicInformation, &process->info, sizeof(process->info), NULL );
     IsWow64Process( handle, &process->wow64 );
+
+    if (!(NtQueryInformationProcess( handle, ProcessTimes, &times, sizeof(times), NULL )))
+        process->create_time = times.CreateTime.QuadPart;
+    else
+        process->create_time = 0;
 
     SERVER_START_REQ(get_dll_info)
     {
@@ -2578,6 +2584,11 @@ const char * WINAPI PsGetProcessImageFileName(PEPROCESS process)
 {
     TRACE("%p -> %p\n", process->image_file_name);
     return process->image_file_name;
+}
+
+LONGLONG WINAPI PsGetProcessCreateTimeQuadPart(PEPROCESS process)
+{
+    return process->create_time;
 }
 
 static void *create_thread_object( HANDLE handle )
