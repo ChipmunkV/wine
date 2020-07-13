@@ -4125,8 +4125,14 @@ void WINAPI ProbeForWrite(void *address, SIZE_T length, ULONG alignment)
  */
 NTSTATUS WINAPI CmRegisterCallback(EX_CALLBACK_FUNCTION *function, void *context, LARGE_INTEGER *cookie)
 {
+    LARGE_INTEGER li = {.QuadPart = 0xdeadbeef};
+
     FIXME("(%p %p %p): stub\n", function, context, cookie);
-    return STATUS_NOT_IMPLEMENTED;
+
+    if(cookie)
+        *cookie = li;
+
+    return STATUS_SUCCESS;
 }
 
 /***********************************************************************
@@ -4135,7 +4141,7 @@ NTSTATUS WINAPI CmRegisterCallback(EX_CALLBACK_FUNCTION *function, void *context
 NTSTATUS WINAPI CmUnRegisterCallback(LARGE_INTEGER cookie)
 {
     FIXME("(%s): stub\n", wine_dbgstr_longlong(cookie.QuadPart));
-    return STATUS_NOT_IMPLEMENTED;
+    return STATUS_SUCCESS;
 }
 
 /***********************************************************************
