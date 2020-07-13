@@ -730,6 +730,14 @@ int write_emulated_memory(BYTE *addr, void *buf, unsigned int length)
     return 1;
 }
 
+struct ex_prefix
+{
+    BOOL present;
+    BOOL r, x, b, w, l;
+    DWORD m, v;
+    WORD p;
+};
+
 #define REX_B   1
 #define REX_X   2
 #define REX_R   4
@@ -737,22 +745,32 @@ int write_emulated_memory(BYTE *addr, void *buf, unsigned int length)
 
 #define MSR_LSTAR   0xc0000082
 
-#define REGMODRM_MOD( regmodrm, rex )   ((regmodrm) >> 6)
-#define REGMODRM_REG( regmodrm, rex )   (((regmodrm) >> 3) & 7) | (((rex) & REX_R) ? 8 : 0)
-#define REGMODRM_RM( regmodrm, rex )    (((regmodrm) & 7) | (((rex) & REX_B) ? 8 : 0))
+#define REGMODRM_MOD( regmodrm, pfx )   ((regmodrm) >> 6)
+#define REGMODRM_REG( regmodrm, pfx )   (((regmodrm) >> 3) & 7) | (pfx.r ? 8 : 0)
+#define REGMODRM_RM( regmodrm, pfx )    (((regmodrm) & 7) | (pfx.b ? 8 : 0))
 
-#define SIB_SS( sib, rex )      ((sib) >> 6)
-#define SIB_INDEX( sib, rex )   (((sib) >> 3) & 7) | (((rex) & REX_X) ? 8 : 0)
-#define SIB_BASE( sib, rex )    (((sib) & 7) | (((rex) & REX_B) ? 8 : 0))
+#define SIB_SS( sib, pfx )      ((sib) >> 6)
+#define SIB_INDEX( sib, pfx )   (((sib) >> 3) & 7) | (pfx.x ? 8 : 0)
+#define SIB_BASE( sib, pfx )    (((sib) & 7) | (pfx.b ? 8 : 0))
 
 static inline DWORD64 *get_int_reg( CONTEXT *context, int index )
 {
     return &context->Rax + index; /* index should be in range 0 .. 15 */
 }
 
-static inline int get_op_size( int long_op, int rex )
+static inline M128A *get_xmm_reg ( CONTEXT *context, int index )
 {
-    if (rex & REX_W)
+    return &context->u.s.Xmm0 + index;
+}
+
+static inline M128A *get_ymm_reg ( CONTEXT *context, int index )
+{
+    return &context->VectorRegister[index];
+}
+
+static inline int get_op_size( int long_op, struct ex_prefix pfx )
+{
+    if (pfx.w)
         return sizeof(DWORD64);
     else if (long_op)
         return sizeof(DWORD);
@@ -761,13 +779,15 @@ static inline int get_op_size( int long_op, int rex )
 }
 
 /* store an operand into a register */
-static void store_reg_word( CONTEXT *context, BYTE regmodrm, const BYTE *addr, int long_op, int rex,
-        enum instr_op op )
+static void store_reg_word( CONTEXT *context, BYTE regmodrm, const BYTE *addr, int long_op, struct ex_prefix pfx, enum instr_op op )
 {
-    int index = REGMODRM_REG( regmodrm, rex );
+    int index = REGMODRM_REG( regmodrm, pfx );
     BYTE *reg = (BYTE *)get_int_reg( context, index );
-    int op_size = get_op_size( long_op, rex );
+    int op_size = get_op_size( long_op, pfx );
     int i;
+
+    if (op_size == 4)
+        memset( reg, 0, 8 );
 
     switch (op)
     {
@@ -786,11 +806,11 @@ static void store_reg_word( CONTEXT *context, BYTE regmodrm, const BYTE *addr, i
 }
 
 /* store an operand into a byte register */
-static void store_reg_byte( CONTEXT *context, BYTE regmodrm, const BYTE *addr, int rex, enum instr_op op )
+static void store_reg_byte( CONTEXT *context, BYTE regmodrm, const BYTE *addr, struct ex_prefix pfx, enum instr_op op )
 {
-    int index = REGMODRM_REG( regmodrm, rex );
+    int index = REGMODRM_REG( regmodrm, pfx );
     BYTE *reg = (BYTE *)get_int_reg( context, index );
-    if (!rex && index >= 4 && index < 8) reg -= (4 * sizeof(DWORD64) - 1); /* special case: ah, ch, dh, bh */
+    if (!pfx.present && index >= 4 && index < 8) reg -= (4 * sizeof(DWORD64) - 1); /* special case: ah, ch, dh, bh */
 
     switch (op)
     {
@@ -812,7 +832,7 @@ static void store_reg_byte( CONTEXT *context, BYTE regmodrm, const BYTE *addr, i
  * Return the address of an instruction operand (from the mod/rm byte).
  */
 static BYTE *INSTR_GetOperandAddr( CONTEXT *context, BYTE *instr, int addl_instr_len,
-                                   int long_addr, int rex, int segprefix, int *len )
+                                   int long_addr, struct ex_prefix pfx, int segprefix, int *len )
 {
     int mod, rm, ss = 0, off, have_sib = 0;
     DWORD64 base = 0, index = 0;
@@ -822,8 +842,8 @@ static BYTE *INSTR_GetOperandAddr( CONTEXT *context, BYTE *instr, int addl_instr
 
     *len = 0;
     GET_VAL( &mod, BYTE );
-    rm  = REGMODRM_RM( mod, rex );
-    mod = REGMODRM_MOD( mod, rex );
+    rm  = REGMODRM_RM( mod, pfx );
+    mod = REGMODRM_MOD( mod, pfx );
 
     if (mod == 3)
         return (BYTE *)get_int_reg( context, rm );
@@ -834,9 +854,9 @@ static BYTE *INSTR_GetOperandAddr( CONTEXT *context, BYTE *instr, int addl_instr
         int id;
 
         GET_VAL( &sib, BYTE );
-        rm = SIB_BASE( sib, rex );
-        id = SIB_INDEX( sib, rex );
-        ss = SIB_SS( sib, rex );
+        rm = SIB_BASE( sib, pfx );
+        id = SIB_INDEX( sib, pfx );
+        ss = SIB_SS( sib, pfx );
 
         index = (id != 4) ? *get_int_reg( context, id ) : 0;
         if (!long_addr) index &= 0xffffffff;
@@ -875,6 +895,231 @@ static BYTE *INSTR_GetOperandAddr( CONTEXT *context, BYTE *instr, int addl_instr
 #undef GET_VAL
 }
 
+static struct ex_prefix get_ex_prefix(BYTE *instr, int *prefix_len)
+{
+    struct ex_prefix pfx = {0};
+
+    /* REX */
+    if ((*instr >> 4) == 0x4)
+    {
+        pfx.w = !!(*instr & REX_W);
+        pfx.r = !!(*instr & REX_R);
+        pfx.x = !!(*instr & REX_X);
+        pfx.b = !!(*instr & REX_B);
+        *prefix_len = 1;
+        pfx.present = TRUE;
+    }
+    else if (*instr == 0xC4 || *instr == 0xC5)
+    {
+        BOOL three_byte_mode = *instr == 0xC4;
+        instr += 1;
+
+        pfx.r = !(*instr & 128);
+        if (three_byte_mode)
+        {
+            pfx.x = !(*instr & 64);
+            pfx.b = !(*instr & 32);
+            pfx.m = *instr & 31;
+            instr+=1;
+            pfx.w = !!(*instr & 128);
+        }
+        else
+            pfx.m = 1;
+
+        pfx.v = ~((*instr >> 3) & 15);
+        pfx.l = !!(*instr & 4);
+        pfx.p = *instr & 3;
+
+        *prefix_len = three_byte_mode ? 3 : 2;
+        pfx.present = TRUE;
+    }
+    else
+    {
+        *prefix_len = 0;
+    }
+    return pfx;
+}
+
+#define SET_BIT(x, n, y) x = (x & (~(1 << n))) | (y << n)
+
+static ULONGLONG INSTR_add(DWORD *flags, BYTE *op1, BYTE op1_len, BYTE *op2, BYTE op2_len)
+{
+    BYTE op2_val[8], result[8];
+    BOOL carry = 0, overflow, zero = TRUE;
+
+    if (op1_len > 8 || op2_len > op1_len)
+    {
+        ERR("Invalid instruction");
+        return 0;
+    }
+
+    /* sign extend op2 to op1_len*/
+    if (op1_len != op2_len)
+    {
+        memcpy(op2_val, op2, op2_len);
+        op2 = op2_val;
+        memset(&op2[op2_len], !!(op2[op2_len - 1] & 0x80), op1_len - op2_len);
+    }
+
+    for (unsigned int i = 0; i < op1_len; i++)
+    {
+        result[i] = op1[i] + (op2[i] + carry);
+        carry = result[i] < op1[i];
+        overflow = (!!(op1[i] & 0x80) != !!(result[i] & 0x80)) ^ carry;
+        if (result[i])
+            zero = FALSE;
+    }
+
+    SET_BIT(*flags, 0, carry);  /* CF */
+    SET_BIT(*flags, 2, __builtin_parity(result[0])); /* PF */
+    //SET_BIT(*flags, 4, ); /* AF */
+    SET_BIT(*flags, 6, zero); /* ZF */
+    SET_BIT(*flags, 7, !!(result[op1_len - 1] & 0x80));     /* SF */
+    SET_BIT(*flags, 11, overflow); /* OF */
+
+    return *(ULONGLONG*)result;
+}
+
+static ULONGLONG INSTR_sub(DWORD *flags, BYTE *op1, BYTE op1_len, BYTE *op2, BYTE op2_len)
+{
+    BYTE op2_val[8], result[8];
+    BOOL carry = 0, overflow, zero = TRUE;
+
+    if (op1_len > 8 || op2_len > op1_len)
+    {
+        ERR("Invalid instruction");
+        return 0;
+    }
+
+    /* sign extend op2 to op1_len*/
+    if (op1_len != op2_len)
+    {
+        memcpy(op2_val, op2, op2_len);
+        op2 = op2_val;
+        memset(&op2[op2_len], !!(op2[op2_len - 1] & 0x80), op1_len - op2_len);
+    }
+
+    for (unsigned int i = 0; i < op1_len; i++)
+    {
+        result[i] = op1[i] - (op2[i] + carry);
+        carry = op1[i] < (op2[i] + carry);
+        overflow = (!!(op1[i] & 0x80) != !!(result[i] & 0x80)) ^ carry;
+        if (result[i])
+            zero = FALSE;
+    }
+
+    TRACE("flags %x carry %u zero %u overflow %u\n", *flags, carry, zero, overflow);
+
+    SET_BIT(*flags, 0, carry);  /* CF */
+    SET_BIT(*flags, 2, __builtin_parity(result[0])); /* PF */
+    //SET_BIT(*flags, 4, ); /* AF */
+    SET_BIT(*flags, 6, zero); /* ZF */
+    SET_BIT(*flags, 7, !!(result[op1_len - 1] & 0x80)); /* SF */
+    SET_BIT(*flags, 11, overflow); /* OF */
+
+    TRACE("flags %x\n", *flags);
+
+    return *(ULONGLONG*)result;
+}
+
+static ULONGLONG INSTR_and(DWORD *flags, BYTE *op1, BYTE op1_len, BYTE *op2, BYTE op2_len)
+{
+    BYTE op2_val[8], result[8];
+    BOOL zero = TRUE;
+
+    if (op1_len > 8 || op2_len > op1_len)
+        return 0;
+
+    /* sign extend op2 to op1_len*/
+    if (op1_len != op2_len)
+    {
+        memcpy(op2_val, op2, op2_len);
+        op2 = op2_val;
+        memset(&op2[op2_len], !!(op2[op2_len - 1] & 0x80), op1_len - op2_len);
+    }
+
+    for (unsigned int i = 0; i < op1_len; i++)
+    {
+        result[i] = op1[i] & op2[i];
+        if (result[i])
+            zero = FALSE;
+    }
+
+    SET_BIT(*flags, 0, 0); /* CF */
+    SET_BIT(*flags, 2, __builtin_parity(result[0])); /* PF */
+    SET_BIT(*flags, 6, zero); /* ZF */
+    SET_BIT(*flags, 7, !!(result[op1_len - 1] & 0x80)); /* SF */
+    SET_BIT(*flags, 11, 0); /* OF */
+
+    return *(ULONGLONG*)result;
+}
+
+static ULONGLONG INSTR_or(DWORD *flags, BYTE *op1, BYTE op1_len, BYTE *op2, BYTE op2_len)
+{
+    BYTE op2_val[8], result[8];
+    BOOL zero = TRUE;
+
+    if (op1_len > 8 || op2_len > op1_len)
+        return 0;
+
+    /* sign extend op2 to op1_len*/
+    if (op1_len != op2_len)
+    {
+        memcpy(op2_val, op2, op2_len);
+        op2 = op2_val;
+        memset(&op2[op2_len], !!(op2[op2_len - 1] & 0x80), op1_len - op2_len);
+    }
+
+    for (unsigned int i = 0; i < op1_len; i++)
+    {
+        result[i] = op1[i] | op2[i];
+        if (result[i])
+            zero = FALSE;
+    }
+
+    SET_BIT(*flags, 0, 0); /* CF */
+    SET_BIT(*flags, 2, __builtin_parity(result[0])); /* PF */
+    SET_BIT(*flags, 6, zero); /* ZF */
+    SET_BIT(*flags, 7, !!(result[op1_len - 1] & 0x80)); /* SF */
+    SET_BIT(*flags, 11, 0); /* OF */
+
+    return *(ULONGLONG*)result;
+}
+
+static ULONGLONG INSTR_xor(DWORD *flags, BYTE *op1, BYTE op1_len, BYTE *op2, BYTE op2_len)
+{
+    BYTE op2_val[8], result[8];
+    BOOL zero = TRUE;
+
+    if (op1_len > 8 || op2_len > op1_len)
+        return 0;
+
+    /* sign extend op2 to op1_len*/
+    if (op1_len != op2_len)
+    {
+        memcpy(op2_val, op2, op2_len);
+        op2 = op2_val;
+        memset(&op2[op2_len], !!(op2[op2_len - 1] & 0x80), op1_len - op2_len);
+    }
+
+    for (unsigned int i = 0; i < op1_len; i++)
+    {
+        result[i] = op1[i] ^ op2[i];
+        if (result[i])
+            zero = FALSE;
+    }
+
+    SET_BIT(*flags, 0, 0); /* CF */
+    SET_BIT(*flags, 2, __builtin_parity(result[0])); /* PF */
+    SET_BIT(*flags, 6, zero); /* ZF */
+    SET_BIT(*flags, 7, !!(result[op1_len - 1] & 0x80)); /* SF */
+    SET_BIT(*flags, 11, 0); /* OF */
+
+    return *(ULONGLONG*)result;
+}
+
+#undef SET_BIT
+
 
 static void fake_syscall_function(void)
 {
@@ -892,17 +1137,22 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
 {
     static const char *reg_names[16] = { "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi",
                                          "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15" };
-    int prefix, segprefix, prefixlen, len, long_op, long_addr, rex;
+    int prefix, segprefix, repprefix, prefixlen, len, long_op, long_addr;
+    struct ex_prefix ex_pfx = {0};
+    int ex_pfx_len;
     BYTE *instr;
 
     long_op = long_addr = 1;
     instr = (BYTE *)context->Rip;
     if (!instr) return ExceptionContinueSearch;
 
+    TRACE("RIP %p %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n", instr, instr[0], instr[1], instr[2], instr[3], instr[4], instr[5], instr[6], instr[7], instr[8], instr[9], instr[10], instr[11]);
+    current_rip = context->Rip;
+
     /* First handle any possible prefix */
 
     segprefix = -1;  /* no seg prefix */
-    rex = 0;  /* no rex prefix */
+    repprefix = 0;
     prefix = 1;
     prefixlen = 0;
     while(prefix)
@@ -949,13 +1199,19 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
         case 0x4d:
         case 0x4e:
         case 0x4f:
-            rex = *instr;
-            break;
+        case 0xc4: /* vex */
+        case 0xc5:
+            ex_pfx = get_ex_prefix(instr, &ex_pfx_len);
+            prefixlen += ex_pfx_len;
+            instr += ex_pfx_len;
+            continue;
         case 0xf0:  /* lock */
             break;
         case 0xf2:  /* repne */
+            repprefix = 0xf2;
             break;
         case 0xf3:  /* repe */
+            repprefix = 0xf3;
             break;
         default:
             prefix = 0;  /* no more prefixes */
@@ -968,17 +1224,54 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
         }
     }
 
+    if (ex_pfx.l && !(context->ContextFlags & CONTEXT_XSTATE))
+    {
+        ERR("ymm registers not supported\n");
+        return ExceptionContinueSearch;
+    }
+
     /* Now look at the actual instruction */
+    if (ex_pfx.m == 1)
+        goto extended;
 
     switch(*instr)
     {
     case 0x0f: /* extended instruction */
-        switch(instr[1])
+    instr++;
+    prefixlen++;
+    extended:
+        switch(*instr)
         {
+        case 0x11: /* movups */
+        {
+            BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
+                                               ex_pfx, segprefix, &len);
+            int reg = REGMODRM_REG( instr[1], ex_pfx );
+
+            if (!(write_emulated_memory(data, &get_xmm_reg(context, reg)->Low, 8)))
+                break;
+            data+=8;
+            if (!(write_emulated_memory(data, &get_xmm_reg(context, reg)->High, 8)))
+                break;
+            data+=8;
+
+            if (ex_pfx.l)
+            {
+                if (!(write_emulated_memory(data, &get_ymm_reg(context, reg)->Low, 8)))
+                    break;
+                data+=8;
+                if (!(write_emulated_memory(data, &get_ymm_reg(context, reg)->High, 8)))
+                    break;
+                data+=8;
+            }
+
+            context->Rip += prefixlen + len + 1;
+            return ExceptionContinueExecution;
+        }
         case 0x20: /* mov crX, Rd */
         {
-            int reg = REGMODRM_REG( instr[2], rex );
-            int rm = REGMODRM_RM( instr[2], rex );
+            int reg = REGMODRM_REG( instr[1], ex_pfx );
+            int rm = REGMODRM_RM( instr[1], ex_pfx );
             DWORD64 *data = get_int_reg( context, rm );
             TRACE( "mov cr%u,%s at %lx\n", reg, reg_names[rm], context->Rip );
             switch (reg)
@@ -990,13 +1283,13 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
             case 8: *data = 0; break;
             default: return ExceptionContinueSearch;
             }
-            context->Rip += prefixlen + 3;
+            context->Rip += prefixlen + 2;
             return ExceptionContinueExecution;
         }
         case 0x21: /* mov drX, Rd */
         {
-            int reg = REGMODRM_REG( instr[2], rex );
-            int rm = REGMODRM_RM( instr[2], rex );
+            int reg = REGMODRM_REG( instr[1], ex_pfx );
+            int rm = REGMODRM_RM( instr[1], ex_pfx );
             DWORD64 *data = get_int_reg( context, rm );
             TRACE( "mov dr%u,%s at %lx\n", reg, reg_names[rm], context->Rip );
             switch (reg)
@@ -1011,13 +1304,13 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
             case 7: *data = 0x400; break;
             default: return ExceptionContinueSearch;
             }
-            context->Rip += prefixlen + 3;
+            context->Rip += prefixlen + 2;
             return ExceptionContinueExecution;
         }
         case 0x22: /* mov Rd, crX */
         {
-            int reg = REGMODRM_REG( instr[2], rex );
-            int rm = REGMODRM_RM( instr[2], rex );
+            int reg = REGMODRM_REG( instr[1], ex_pfx );
+            int rm = REGMODRM_RM( instr[1], ex_pfx );
             DWORD64 *data = get_int_reg( context, rm );
             TRACE( "mov %s,cr%u at %lx, %s=%lx\n", reg_names[rm], reg, context->Rip, reg_names[rm], *data );
             switch (reg)
@@ -1029,13 +1322,13 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
             case 8: break;
             default: return ExceptionContinueSearch;
             }
-            context->Rip += prefixlen + 3;
+            context->Rip += prefixlen + 2;
             return ExceptionContinueExecution;
         }
         case 0x23: /* mov Rd, drX */
         {
-            int reg = REGMODRM_REG( instr[2], rex );
-            int rm = REGMODRM_RM( instr[2], rex );
+            int reg = REGMODRM_REG( instr[1], ex_pfx );
+            int rm = REGMODRM_RM( instr[1], ex_pfx );
             DWORD64 *data = get_int_reg( context, rm );
             TRACE( "mov %s,dr%u at %lx, %s=%lx\n", reg_names[rm], reg, context->Rip, reg_names[rm], *data );
             switch (reg)
@@ -1050,7 +1343,7 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
             case 7: context->Dr7 = *data; break;
             default: return ExceptionContinueSearch;
             }
-            context->Rip += prefixlen + 3;
+            context->Rip += prefixlen + 2;
             return ExceptionContinueExecution;
         }
         case 0x32: /* rdmsr */
@@ -1072,37 +1365,496 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
                 context->Rax = 0;
                 break;
             }
-            context->Rip += prefixlen + 2;
+            context->Rip += prefixlen + 1;
             return ExceptionContinueExecution;
+        }
+        case 0x48: /* cmovs r, [r] */
+        case 0x49: /* cmovns r, [r] */
+        {
+            BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
+                                               ex_pfx, segprefix, &len);
+            unsigned int data_size = get_op_size(long_op, ex_pfx);
+
+            if ((*instr == 0x48) == !!(context->EFlags & 0x0080)) /* SF */
+            {
+                BYTE buf[8];
+                if (!(read_emulated_memory(buf, data, data_size)))
+                    return ExceptionContinueSearch;
+                store_reg_word( context, instr[1], buf, long_op, ex_pfx, INSTR_OP_MOV );
+            }
+            TRACE("cmov(n)s r, [r]\n");
+            context->Rip += prefixlen + len + 1;
+            return ExceptionContinueExecution;
+        }
+        case 0x6f: /* movdqu */
+        {
+            BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
+                                               ex_pfx, segprefix, &len );
+            unsigned int data_size = 16;
+            int reg = REGMODRM_REG( instr[1], ex_pfx );
+
+            if (!(read_emulated_memory(get_xmm_reg(context, reg), data, data_size)))
+                break;
+            if (ex_pfx.l && !(read_emulated_memory(get_ymm_reg(context, reg), data + 16, data_size)))
+                break;
+
+            context->Rip += prefixlen + len + 1;
+            return ExceptionContinueExecution;
+        }
+        case 0x74: /* VPCMPEQB */
+        {
+            BYTE *source2_addr = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
+                                              ex_pfx, segprefix, &len );
+            unsigned int data_size = ex_pfx.l ? 32 : 16;
+            int source1_reg = ex_pfx.v;
+            int dest_reg = REGMODRM_REG( instr[1], ex_pfx );
+            BYTE dest[32], source1[32], source2[32];
+
+            /* non VEX variant unsupported */
+            if (prefixlen < 2)
+                break;
+
+            memcpy(source1, get_xmm_reg(context, source1_reg), 16);
+            if (data_size == 32)
+                memcpy(source1 + 16, get_ymm_reg(context, source1_reg), 16);
+
+            if (!(read_emulated_memory(source2, source2_addr, data_size)))
+                break;
+
+            for (unsigned int i = 0; i < data_size; i++)
+                dest[i] = source1[i] == source2[i] ? 0xff : 0;
+
+            memcpy(get_xmm_reg(context, dest_reg), dest, 16);
+            if (data_size == 32)
+                memcpy(get_ymm_reg(context, dest_reg), dest + 16, 16);
+
+            context->Rip += prefixlen + len + 1;
+            return ExceptionContinueExecution;
+        }
+        case 0x7f:
+        {
+            BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
+                                               ex_pfx, segprefix, &len );
+            unsigned int data_size = ex_pfx.l ? 32 : 16;
+            int reg = REGMODRM_REG (instr[1], ex_pfx);
+            BYTE full_reg[32];
+
+            memcpy(full_reg, get_xmm_reg(context, reg), 16);
+            if (ex_pfx.l)
+                memcpy(full_reg + 16, get_ymm_reg(context, reg), 16);
+
+            if (!(write_emulated_memory(data, full_reg, data_size)))
+                break;
+
+            context->Rip += prefixlen + len + 1;
+            return ExceptionContinueExecution;
+        }
+        case 0xb0:
+        case 0xb1: /* cmpxchg*/
+        {
+            BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
+                                               ex_pfx, segprefix, &len );
+            unsigned int data_size = (*instr == 0xb1) ? get_op_size(long_op, ex_pfx) : 1;
+            int reg = REGMODRM_REG( instr[1], ex_pfx );
+            BYTE op1[8];
+            BYTE *op2 = (BYTE *)get_int_reg( context, reg );
+
+            if (read_emulated_memory(op1, data, data_size))
+            {
+                if (!(INSTR_sub(&context->EFlags, op1, data_size, (BYTE*) &context->Rax, data_size)))
+                {
+                    /* accumulator == op1 */
+                    if (!(write_emulated_memory(data, op2 + (8 - data_size), data_size)))
+                        return ExceptionContinueSearch;
+                }
+                else
+                {
+                    memcpy(&context->Rax + (8 - data_size), op1, data_size);
+                }
+                context->Rip += prefixlen + len + 1;
+                return ExceptionContinueExecution;
+            }
+            break;
         }
         case 0xb6: /* movzx Eb, Gv */
         case 0xb7: /* movzx Ew, Gv */
         {
-            BYTE *data = INSTR_GetOperandAddr( context, instr + 2, prefixlen + 2, long_addr,
-                                               rex, segprefix, &len );
-            unsigned int data_size = (instr[1] == 0xb7) ? 2 : 1;
+            BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
+                                               ex_pfx, segprefix, &len );
+            unsigned int data_size = (*instr == 0xb7) ? 2 : 1;
             BYTE temp[8] = {0};
-
 
             if (read_emulated_memory(temp, data, data_size))
             {
-                store_reg_word( context, instr[2], temp, long_op, rex, INSTR_OP_MOV );
-                context->Rip += prefixlen + len + 2;
+                store_reg_word( context, instr[1], temp, long_op, ex_pfx, INSTR_OP_MOV );
+                context->Rip += prefixlen + len + 1;
                 return ExceptionContinueExecution;
             }
             break;  /* Unable to emulate it */
         }
+        case 0xbe:
+        case 0xbf: /* movsx */
+        {
+            BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
+                                               ex_pfx, segprefix, &len );
+            unsigned int data_size = (*instr == 0xbf) ?  2 : 1;
+            BYTE buf[8];
+
+            if (read_emulated_memory(buf, data, data_size))
+            {
+                memset(buf + data_size, buf[data_size - 1] & 0x80, get_op_size(long_op, ex_pfx) - data_size);
+                store_reg_word( context, instr[1], buf, long_op, ex_pfx, INSTR_OP_MOV );
+                context->Rip += prefixlen + len + 1;
+                return ExceptionContinueExecution;
+            }
+            break;
+        }
+        case 0xc0:
+        case 0xc1: /* xadd */
+        {
+            BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
+                                               ex_pfx, segprefix, &len );
+            unsigned int data_size = (*instr == 0xc1) ? get_op_size(long_op, ex_pfx) : 1;
+            int reg = REGMODRM_REG( instr[1], ex_pfx );
+            BYTE op1[8];
+            BYTE *op2 = (BYTE *)get_int_reg( context, reg );
+
+            if (read_emulated_memory(op1, data, data_size))
+            {
+                ULONGLONG buf = INSTR_add(&context->EFlags, op1, data_size, op2, data_size);
+                if (write_emulated_memory(data, (BYTE*)&buf, data_size))
+                {
+                    TRACE("xadd\n");
+                    switch (*instr)
+                    {
+                    case 0xc0: store_reg_byte(context, instr[1], op1, ex_pfx, INSTR_OP_MOV); break;
+                    case 0xc1: store_reg_word(context, instr[1], op1, long_op, ex_pfx, INSTR_OP_MOV); break;
+                    }
+
+                    context->Rip += prefixlen + len + 1;
+
+                    return ExceptionContinueExecution;
+                }
+            }
+
+            break;
+        }
+        case 0xc3: /* movnti */
+        {
+            BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
+                                               ex_pfx, segprefix, &len );
+
+            unsigned int data_size = get_op_size(1, ex_pfx );
+            DWORD64 *reg_pointer = get_int_reg(context, REGMODRM_REG( instr[1], ex_pfx));
+
+            if (write_emulated_memory(data, reg_pointer, data_size))
+            {
+                context->Rip += prefixlen + 1 + len;
+                return ExceptionContinueExecution;
+            }
+            break;
+        }
         }
         break;  /* Unable to emulate it */
 
+    case 0x01: /* add */
+    {
+        BYTE *data = INSTR_GetOperandAddr(context, &instr[1], prefixlen + 1, long_addr, ex_pfx, segprefix, &len);
+        unsigned int data_size = get_op_size( long_op, ex_pfx);
+        int reg = REGMODRM_REG( instr[1], ex_pfx );
+        BYTE op1[8];
+        BYTE *op2 = (BYTE *)get_int_reg( context, reg );
+
+        if (read_emulated_memory(op1, data, data_size))
+        {
+            ULONGLONG buf = INSTR_add(&context->EFlags, op1, data_size, op2, data_size);
+
+            if (write_emulated_memory(data, &buf, data_size))
+            {
+                TRACE("add r/ r\n");
+                context->Rip += prefixlen + len + 1;
+                return ExceptionContinueExecution;
+            }
+        }
+        break;
+    }
+    case 0x02:
+    case 0x03: /* add */
+    {
+        BYTE *data = INSTR_GetOperandAddr(context, &instr[1], prefixlen + 1, long_addr, ex_pfx, segprefix, &len);
+        unsigned int data_size = (*instr == 0x03) ? get_op_size( long_op, ex_pfx ) : 1;
+        int reg = REGMODRM_REG( instr[1], ex_pfx );
+        BYTE *op1 = (BYTE *)get_int_reg( context, reg );
+        BYTE op2[8];
+
+        if (read_emulated_memory(op2, data, data_size))
+        {
+            ULONGLONG buf = INSTR_add(&context->EFlags, op1, data_size, op2, data_size);
+            TRACE("add r [r]\n");
+            switch (*instr)
+            {
+            case 0x02: store_reg_byte(context, instr[1], (BYTE *) &buf, ex_pfx, INSTR_OP_MOV); break;
+            case 0x03: store_reg_word(context, instr[1], (BYTE *) &buf, long_op, ex_pfx, INSTR_OP_MOV); break;
+            }
+            context->Rip += prefixlen + len + 1;
+            return ExceptionContinueExecution;
+        }
+        break;
+    }
+
+    case 0x08:
+    case 0x09: /* or */
+    {
+        BYTE *data = INSTR_GetOperandAddr(context, &instr[1], prefixlen + 1, long_addr, ex_pfx, segprefix, &len);
+        unsigned int data_size = (*instr == 0x09) ? get_op_size(long_op, ex_pfx) : 1;
+        int reg = REGMODRM_REG( instr[1], ex_pfx );
+        BYTE op1[8];
+        BYTE *op2 = (BYTE *)get_int_reg( context, reg );
+
+        if (read_emulated_memory(op1, data, data_size))
+        {
+            ULONGLONG buf = INSTR_or(&context->EFlags, op1, data_size, op2, data_size);
+
+            if (write_emulated_memory(data, &buf, data_size))
+            {
+                TRACE("or r/ r\n");
+                context->Rip += prefixlen + len + 1;
+                return ExceptionContinueExecution;
+            }
+        }
+
+        break;
+    }
+
+    case 0x28:
+    case 0x29:
+    {
+        BYTE *data = INSTR_GetOperandAddr(context, &instr[1], prefixlen + 1, long_addr, ex_pfx, segprefix, &len);
+        unsigned int data_size = (*instr == 0x29) ? get_op_size(long_op, ex_pfx) : 1;
+        int reg = REGMODRM_REG( instr[1], ex_pfx );
+        BYTE op1[8];
+        BYTE *op2 = (BYTE*)get_int_reg( context, reg );
+
+        if (read_emulated_memory(op1, data, data_size))
+        {
+            ULONGLONG buf = INSTR_sub(&context->EFlags, op1, data_size, op2, data_size);
+
+            if (write_emulated_memory(data, &buf, data_size))
+            {
+                TRACE("sub r/ r, buf = %016lx\n", buf);
+                context->Rip += prefixlen + len + 1;
+                return ExceptionContinueExecution;
+            }
+        }
+
+        break;
+    }
+
+    case 0x32:
+    {
+        BYTE *data = INSTR_GetOperandAddr(context, &instr[1], prefixlen + 1, long_addr, ex_pfx, segprefix, &len);
+        unsigned int data_size = (*instr == 0x33) ? get_op_size( long_op, ex_pfx ) : 1;
+        int reg = REGMODRM_REG( instr[1], ex_pfx );
+        BYTE *op1 = (BYTE *)get_int_reg( context, reg );
+        BYTE op2[8];
+
+        if (read_emulated_memory(op2, data, data_size))
+        {
+            ULONGLONG buf = INSTR_xor(&context->EFlags, op1, data_size, op2, data_size);
+            TRACE("xor r [r]\n");
+            switch (*instr)
+            {
+            case 0x02: store_reg_byte(context, instr[1], (BYTE *) &buf, ex_pfx, INSTR_OP_MOV); break;
+            case 0x03: store_reg_word(context, instr[1], (BYTE *) &buf, long_op, ex_pfx, INSTR_OP_MOV); break;
+            }
+            context->Rip += prefixlen + len + 1;
+            return ExceptionContinueExecution;
+        }
+        break;
+    }
+
+    case 0x38:
+    case 0x39: /* cmp */
+    {
+        BYTE *data = INSTR_GetOperandAddr(context, &instr[1], prefixlen + 1, long_addr, ex_pfx, segprefix, &len);
+        unsigned int data_size = (*instr == 0x39) ? get_op_size( long_op, ex_pfx ) : 1;
+        int reg = REGMODRM_REG( instr[1], ex_pfx );
+        int rm = REGMODRM_RM( instr[1], ex_pfx );
+        BYTE op1[8];
+        BYTE *op2 = (BYTE *)get_int_reg( context, reg );
+
+        if (read_emulated_memory(op1, data, data_size))
+        {
+            TRACE("cmp %u-byte PTR [%s], %s\n", data_size, reg_names[rm], reg_names[reg]);
+            INSTR_sub(&context->EFlags, op1, data_size, op2, data_size);
+
+            context->Rip += prefixlen + len + 1;
+            return ExceptionContinueExecution;
+        }
+        break;  /* Unable to emulate it */
+    }
+    case 0x3b: /* cmp */
+    {
+        BYTE *data = INSTR_GetOperandAddr(context, &instr[1], prefixlen + 1, long_addr, ex_pfx, segprefix, &len);
+        unsigned int data_size = get_op_size( long_op, ex_pfx );
+        int reg = REGMODRM_REG( instr[1], ex_pfx );
+        int rm = REGMODRM_RM( instr[1], ex_pfx );
+        BYTE *op1 = (BYTE *)get_int_reg( context, reg );
+        BYTE op2[8];
+
+        if (read_emulated_memory(op2, data, data_size))
+        {
+            TRACE("cmp %s, %u-byte PTR[%s]\n", reg_names[reg], data_size, reg_names[rm]);
+            INSTR_sub(&context->EFlags, op1, data_size, op2, data_size);
+
+            context->Rip += prefixlen + len + 1;
+            return ExceptionContinueExecution;
+        }
+        break;  /* Unable to emulate it */
+    }
+    case 0x63: /* movsxd */
+    {
+        BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen +1, long_addr,
+                                           ex_pfx, segprefix, &len );
+        unsigned int data_size = long_op ? 4 : 2;
+        BYTE buf[8];
+
+        if (read_emulated_memory(buf, data, data_size))
+        {
+            memset(buf + data_size, buf[data_size - 1] & 0x80, get_op_size(long_op, ex_pfx) - data_size);
+            store_reg_word( context, instr[1], buf, long_op, ex_pfx, INSTR_OP_MOV );
+            context->Rip += prefixlen + len + 1;
+            return ExceptionContinueExecution;
+        }
+        break;
+    }
+    case 0x80:
+    case 0x81:
+    case 0x83:
+    {
+        BYTE *data = INSTR_GetOperandAddr(context, &instr[1], prefixlen + 1, long_addr, ex_pfx, segprefix, &len);
+        unsigned int data_size = (*instr == 0x80) ? 1 : get_op_size( long_op, ex_pfx );
+        int reg = REGMODRM_REG( instr[1], ex_pfx );
+        int rm = REGMODRM_RM( instr[1], ex_pfx );
+        ULONG imm_size = (*instr == 0x81) ? (long_op ? 4 : 2) : 1;
+        BYTE op1[8];
+
+        if (read_emulated_memory(op1, data, data_size))
+        {
+            switch(reg)
+            {
+            case 0x00: /* add */
+            {
+                ULONGLONG buf = INSTR_add(&context->EFlags, op1, data_size, &instr[1 + len], imm_size);
+                if (write_emulated_memory(data, &buf, data_size))
+                {
+                    TRACE("add %u-byte PTR [%s + ?], 0x%02x\n", data_size, reg_names[rm], instr[1 + len]);
+                    context->Rip += prefixlen + 1 + len + imm_size;
+                    return ExceptionContinueExecution;
+                }
+                break;
+            }
+            case 0x01: /* or */
+            {
+                ULONGLONG buf = INSTR_or(&context->EFlags, op1, data_size, &instr[1 + len], imm_size);
+                if (write_emulated_memory(data, &buf, data_size))
+                {
+                    TRACE("or %u-byte PTR [%s + ?], 0x%02x\n", data_size, reg_names[rm], instr[1 + len]);
+                    context->Rip += prefixlen + 1 + len + imm_size;
+                    return ExceptionContinueExecution;
+                }
+                break;
+            }
+            case 0x04: /* and */
+            {
+                ULONGLONG buf = INSTR_and(&context->EFlags, op1, data_size, &instr[1 + len], imm_size);
+                if (write_emulated_memory(data, &buf, data_size))
+                {
+                    TRACE("and %u-byte PTR [%s + ?], 0x%02x\n", data_size, reg_names[rm], instr[1 + len]);
+                    context->Rip += prefixlen + 1 + len + imm_size;
+                    return ExceptionContinueExecution;
+                }
+                break;  /* Unable to emulate it */
+            }
+            case 0x05: /* sub */
+            {
+                ULONGLONG buf = INSTR_sub(&context->EFlags, op1, data_size, &instr[1 + len], imm_size);
+                if (write_emulated_memory(data, &buf, data_size))
+                {
+                    TRACE("sub %u-byte PTR [%s + ?], 0x%02x\n", data_size, reg_names[rm], instr[1 + len]);
+                    context->Rip += prefixlen + 1 + len + imm_size;
+                    return ExceptionContinueExecution;
+                }
+                break;
+            }
+            case 0x06: /* xor */
+            {
+                ULONGLONG buf = INSTR_xor(&context->EFlags, op1, data_size, &instr[1 + len], imm_size);
+                if (write_emulated_memory(data, &buf, data_size))
+                {
+                    TRACE("xor %u-byte PTR [%s + ?], 0x%02x\n", data_size, reg_names[rm], instr[1 + len]);
+                    context->Rip += prefixlen + 1 + len + imm_size;
+                    return ExceptionContinueExecution;
+                }
+                break;
+            }
+            case 0x07: /* cmp */
+            {
+                TRACE("cmp %u-byte PTR [%s + ?], 0x%02x\n", data_size, reg_names[rm], instr[1 + len]);
+                INSTR_sub(&context->EFlags, op1, data_size, &instr[1 + len], imm_size);
+
+                context->Rip += prefixlen + 1 + len + imm_size;
+                return ExceptionContinueExecution;
+                break;  /* Unable to emulate it */
+            }
+            }
+        }
+        break;  /* Unable to emulate it */
+    }
+    case 0x86:
+    case 0x87: /* xchg */
+    {
+        BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
+                                           ex_pfx, segprefix, &len);
+        unsigned int data_size = (*instr == 0x87) ? get_op_size(long_op, ex_pfx) : 1;
+        int reg = REGMODRM_REG( instr[1], ex_pfx );
+        BYTE *arg2 = (BYTE *)get_int_reg( context, reg );
+        DWORD64 temp;
+        if (!(read_emulated_memory(&temp, data, data_size)))
+            return ExceptionContinueSearch;
+        if (!(write_emulated_memory(data, arg2 + (8 - data_size), data_size)))
+            return ExceptionContinueSearch;
+        memcpy(arg2 + (8 - data_size), &temp, data_size);
+
+        context->Rip += prefixlen + len + 1;
+        return ExceptionContinueExecution;
+    }
+    case 0x88:
+    case 0x89: /* mov [r], r*/
+    {
+        BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
+                                           ex_pfx, segprefix, &len);
+        unsigned int data_size = (*instr == 0x89) ? get_op_size( long_op, ex_pfx ) : 1;
+        DWORD64 *reg_pointer = get_int_reg(context, REGMODRM_REG( instr[1], ex_pfx ));
+
+        TRACE("mov [r], r\n");
+
+        if (write_emulated_memory(data, reg_pointer, data_size))
+        {
+            context->Rip += prefixlen + 1 + len;
+            return ExceptionContinueExecution;
+        }
+
+        break;  /* Unable to emulate it */
+    }
     case 0x8a: /* mov Eb, Gb */
     case 0x8b: /* mov Ev, Gv */
     case 0x0b: /* or  Ev, Gv */
     case 0x33: /* xor Ev, Gv */
     {
         BYTE *data = INSTR_GetOperandAddr( context, instr + 1, prefixlen + 1, long_addr,
-                                           rex, segprefix, &len );
-        unsigned int data_size = (*instr == 0x8b) ? get_op_size( long_op, rex ) : 1;
+                                           ex_pfx, segprefix, &len );
+        unsigned int data_size = (*instr == 0x8b) ? get_op_size( long_op, ex_pfx ) : 1;
 
         BYTE temp[8];
         if (read_emulated_memory(temp, data, data_size))
@@ -1110,16 +1862,16 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
             switch (*instr)
             {
                 case 0x8a:
-                    store_reg_byte( context, instr[1], temp, rex, INSTR_OP_MOV );
+                    store_reg_byte( context, instr[1], temp, ex_pfx, INSTR_OP_MOV );
                     break;
                 case 0x8b:
-                    store_reg_word( context, instr[1], temp, long_op, rex, INSTR_OP_MOV );
+                    store_reg_word( context, instr[1], temp, long_op, ex_pfx, INSTR_OP_MOV );
                     break;
                 case 0x0b:
-                    store_reg_word( context, instr[1], temp, long_op, rex, INSTR_OP_OR );
+                    store_reg_word( context, instr[1], temp, long_op, ex_pfx, INSTR_OP_OR );
                     break;
                 case 0x33:
-                    store_reg_word( context, instr[1], temp, long_op, rex, INSTR_OP_XOR );
+                    store_reg_word( context, instr[1], temp, long_op, ex_pfx, INSTR_OP_XOR );
                     break;
             }
             context->Rip += prefixlen + len + 1;
@@ -1132,7 +1884,7 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
     case 0xa1: /* mov Ovqp, rAX */
     {
         BYTE *data = (BYTE *)(long_addr ? *(DWORD64 *)(instr + 1) : *(DWORD *)(instr + 1));
-        unsigned int data_size = (*instr == 0xa1) ? get_op_size( long_op, rex ) : 1;
+        unsigned int data_size = (*instr == 0xa1) ? get_op_size( long_op, ex_pfx ) : 1;
         BYTE temp[8];
         len = long_addr ? sizeof(DWORD64) : sizeof(DWORD);
 
@@ -1145,13 +1897,136 @@ static DWORD emulate_instruction( EXCEPTION_RECORD *rec, CONTEXT *context )
         break;  /* Unable to emulate it */
     }
 
+    case 0xaa: /* STOSB */
+    case 0xab:
+    {
+        unsigned int data_size = (*instr == 0xab) ? get_op_size( long_op, ex_pfx ) : 1;
+
+        if ((repprefix == 0xf2 || repprefix == 0xf3) && context->Rcx == 0)
+            break;
+
+        again1:
+        if (write_emulated_memory((BYTE*)(context->Rdi & (long_addr ? (DWORD64)-1 : (DWORD)-1)), &context->Rax, data_size))
+        {
+            if (context->EFlags & 0x400) context->Rdi -= data_size; else context->Rdi += data_size;
+
+            if (repprefix == 0xf2 || repprefix == 0xf3)
+            {
+                context->Rcx--;
+                if (context->Rax != 0)
+                    goto again1;
+            }
+
+            context->Rip += prefixlen + 1;
+            return ExceptionContinueExecution;
+        }
+
+        break;
+    }
+
+    case 0xae: /* SCAS */
+    case 0xaf:
+    {
+        BYTE op2[8];
+        unsigned int data_size = (*instr == 0xaf) ? get_op_size( long_op, ex_pfx ) : 1;
+
+        if ((repprefix == 0xf2 || repprefix == 0xf3) && context->Rcx == 0)
+            break;
+
+        again2:
+        if (read_emulated_memory(op2, (BYTE*)(context->Rdi & (long_addr ? (DWORD64)-1 : (DWORD)-1)), data_size))
+        {
+            INSTR_sub(&context->EFlags, (BYTE*)&context->Rax, data_size, op2, data_size);
+            if (context->EFlags & 0x400) context->Rdi -= data_size; else context->Rdi += data_size;
+
+            if (repprefix == 0xf2 || repprefix == 0xf3)
+            {
+                context->Rcx--;
+                if (context->Rax != 0 || (*instr == 0xf3) ==  !!(context->EFlags & 0x40))
+                goto again2;
+            }
+
+            context->Rip += prefixlen + 1;
+            return ExceptionContinueExecution;
+        }
+
+        break;
+    }
+
+    case 0xc6:
+    case 0xc7:
+    {
+        BYTE *data = INSTR_GetOperandAddr(context, &instr[1], prefixlen + 1, long_addr, ex_pfx, segprefix, &len);
+        unsigned int data_size = (*instr == 0xc7) ? get_op_size( long_op, ex_pfx ) : 1;
+        int reg = REGMODRM_REG( instr[1], ex_pfx );
+        ULONG imm_size = (*instr == 0xc7) ? (long_op ? 4 : 2) : 1;
+        BYTE imm[8];
+
+        switch (reg)
+        {
+            case 0x0: /* MOV [r], imm */
+            {
+                TRACE("mov [r], imm\n");
+
+                memcpy(imm, instr + 1 + len, imm_size);
+                memset(&imm[imm_size], imm[imm_size - 1] & 0x80, data_size - imm_size);
+
+                if (write_emulated_memory(data, imm, data_size))
+                {
+                    context->Rip += prefixlen + 1 + len + imm_size;
+                    return ExceptionContinueExecution;
+                }
+            }
+        }
+        break;  /* Unable to emulate it */
+    }
+
+    case 0xf6:
+    case 0xf7:
+    {
+        BYTE *data = INSTR_GetOperandAddr(context, &instr[1], prefixlen + 1, long_addr, ex_pfx, segprefix, &len);
+        unsigned int data_size = (*instr == 0xf7) ? get_op_size( long_op, ex_pfx ) : 1;
+        int reg = REGMODRM_REG( instr[1], ex_pfx );
+        ULONG imm_size = (*instr == 0xc7) ? (long_op ? 4 : 2) : 1;
+
+        switch (reg)
+        {
+            case 0x0: /* test [r], imm */
+            {
+                TRACE("test [r], imm\n");
+
+                INSTR_and(&context->EFlags, data, data_size, &instr[1 + len], imm_size);
+                context->Rip += prefixlen + 1 + len + imm_size;
+                return ExceptionContinueExecution;
+            }
+        }
+        break;
+    }
+
     case 0xfa: /* cli */
     case 0xfb: /* sti */
         context->Rip += prefixlen + 1;
         return ExceptionContinueExecution;
+    case 0xff: /* near call */
+    {
+        BYTE *data = INSTR_GetOperandAddr(context, &instr[1], prefixlen + 1, long_addr, ex_pfx, segprefix, &len);
+        DWORD64 func_addr;
+
+        if (read_emulated_memory(&func_addr, data, sizeof(DWORD64)))
+        {
+            TRACE("call %lx\n", func_addr);
+            context->Rsp -= sizeof(DWORD64);
+            *(DWORD64*)context->Rsp = context->Rip + prefixlen + 1 + len;
+            context->Rip = func_addr;
+            return ExceptionContinueExecution;
+        }
+        break;
+    }
     }
     return ExceptionContinueSearch;  /* Unable to emulate it */
 }
+
+DECLARE_CRITICAL_SECTION(emulate_cs);
 
 
 /***********************************************************************
@@ -1166,23 +2041,42 @@ LONG CALLBACK vectored_handler( EXCEPTION_POINTERS *ptrs )
     CONTEXT *context = ptrs->ContextRecord;
 
     if (record->ExceptionCode == EXCEPTION_PRIV_INSTRUCTION ||
-        (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
-         record->ExceptionInformation[0] == EXCEPTION_READ_FAULT))
+        record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ||
+        (record->ExceptionCode == EXCEPTION_STACK_OVERFLOW))
     {
+        if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && (record->NumberParameters < 2 || !record->ExceptionInformation[1]))
+            return ExceptionContinueSearch;
+
+        EnterCriticalSection(&emulate_cs);
         if (emulate_instruction( record, context ) == ExceptionContinueExecution)
         {
-            TRACE( "next instruction rip=%lx\n", context->Rip );
-            TRACE( "  rax=%016lx rbx=%016lx rcx=%016lx rdx=%016lx\n",
+            TRACE( "next instruction rip=%016llx\n", context->Rip );
+            TRACE( "  rax=%016llx rbx=%016llx rcx=%016llx rdx=%016llx\n",
                    context->Rax, context->Rbx, context->Rcx, context->Rdx );
-            TRACE( "  rsi=%016lx rdi=%016lx rbp=%016lx rsp=%016lx\n",
+            TRACE( "  rsi=%016llx rdi=%016llx rbp=%016llx rsp=%016llx\n",
                    context->Rsi, context->Rdi, context->Rbp, context->Rsp );
-            TRACE( "   r8=%016lx  r9=%016lx r10=%016lx r11=%016lx\n",
+            TRACE( "   r8=%016llx  r9=%016llx r10=%016llx r11=%016llx\n",
                    context->R8, context->R9, context->R10, context->R11 );
-            TRACE( "  r12=%016lx r13=%016lx r14=%016lx r15=%016lx\n",
+            TRACE( "  r12=%016llx r13=%016llx r14=%016llx r15=%016llx\n",
                    context->R12, context->R13, context->R14, context->R15 );
+            LeaveCriticalSection(&emulate_cs);
 
             return EXCEPTION_CONTINUE_EXECUTION;
         }
+        else
+        {
+            ERR("Unrecognized instruction at %016llx\n", context->Rip);
+
+            ERR( "  rax=%016llx rbx=%016llx rcx=%016llx rdx=%016llx\n",
+                   context->Rax, context->Rbx, context->Rcx, context->Rdx );
+            ERR( "  rsi=%016llx rdi=%016llx rbp=%016llx rsp=%016llx\n",
+                   context->Rsi, context->Rdi, context->Rbp, context->Rsp );
+            ERR( "   r8=%016llx  r9=%016llx r10=%016llx r11=%016llx\n",
+                   context->R8, context->R9, context->R10, context->R11 );
+            ERR( "  r12=%016llx r13=%016llx r14=%016llx r15=%016llx\n",
+                   context->R12, context->R13, context->R14, context->R15 );
+        }
+        LeaveCriticalSection(&emulate_cs);
     }
     return EXCEPTION_CONTINUE_SEARCH;
 }
