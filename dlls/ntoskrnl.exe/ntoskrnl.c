@@ -5280,6 +5280,17 @@ void WINAPI ExReleaseRundownProtection(PVOID runref)
     FIXME("stub! (%p)\n", runref);
 }
 
+#ifdef __x86_64__
+__ASM_GLOBAL_FUNC(unk_func,
+"subq $0x100,%rsp\n\t"
+".byte 0x33,0xff\n\t" // xorl %edi,%edi
+".byte 0x39,0x3d,0xff,0xff,0xff,0xff\n\t" // cmp %edi,-0x1(%rip)
+".byte 0x74,0x00\n\t" // je 0x1
+"movb $0x1,%al\n\t"
+"jmp 0x100\n\t"
+)
+#endif
+
 KPROCESSOR_MODE WINAPI ExGetPreviousMode(void)
 {
     return ((PKTHREAD)NtCurrentTeb()->SystemReserved1[15])->prev_mode;
