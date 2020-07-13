@@ -803,6 +803,7 @@
 @ stdcall NtQuerySecurityObject(long long ptr long ptr)
 @ stdcall NtQuerySystemInformation(long ptr long ptr)
 @ stdcall NtQuerySystemInformationEx(long ptr long ptr long ptr)
+@ stdcall NtQueryVirtualMemory(long ptr long ptr long ptr)
 @ stdcall NtQueryVolumeInformationFile(long ptr ptr long long)
 @ stdcall NtReadFile(long long ptr ptr ptr ptr long ptr ptr)
 @ stub NtRequestPort
