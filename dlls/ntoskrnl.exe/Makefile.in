@@ -7,6 +7,7 @@ EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	disk.c \
+	handle.c \
 	instr.c \
 	ntoskrnl.c \
 	pnp.c \
