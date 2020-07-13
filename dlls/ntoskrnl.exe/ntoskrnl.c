@@ -3596,6 +3596,14 @@ void WINAPI PsRevertToSelf(void)
     FIXME("\n");
 }
 
+NTSTATUS WINAPI PsWrapApcWow64Thread(PVOID *apc_context, PVOID *apc_routine)
+{
+    FIXME("stub! (%p %p)\n", apc_context, apc_routine);
+
+    return STATUS_SUCCESS;
+}
+
+
 static struct list process_create_callbacks = LIST_INIT(process_create_callbacks);
 struct process_create_callback
 {

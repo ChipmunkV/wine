@@ -962,6 +962,7 @@
 @ stdcall PsSuspendProcess(ptr)
 @ stdcall PsTerminateSystemThread(long)
 @ extern PsThreadType
+@ stdcall PsWrapApcWow64Thread(ptr ptr)
 @ stdcall READ_REGISTER_BUFFER_UCHAR(ptr ptr long)
 @ stub READ_REGISTER_BUFFER_ULONG
 @ stub READ_REGISTER_BUFFER_USHORT
