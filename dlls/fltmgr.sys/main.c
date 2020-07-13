@@ -31,6 +31,12 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(fltmgr);
 
+static inline LPCSTR debugstr_us( const UNICODE_STRING *us )
+{
+    if (!us) return "<null>";
+    return debugstr_wn( us->Buffer, us->Length / sizeof(WCHAR) );
+}
+
 NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
 {
     TRACE( "(%p, %s)\n", driver, debugstr_w(path->Buffer) );
@@ -78,6 +84,85 @@ NTSTATUS WINAPI FltStartFiltering( PFLT_FILTER filter )
 void WINAPI FltUnregisterFilter( PFLT_FILTER filter )
 {
     FIXME( "(%p): stub\n", filter );
+}
+
+static POBJECT_TYPE IoFileObjectType(void)
+{
+    HMODULE ntoskrnl_mod = GetModuleHandleA("ntoskrnl.exe");
+
+    return *((POBJECT_TYPE *)GetProcAddress(ntoskrnl_mod, "IoFileObjectType"));
+}
+
+static NTSTATUS p_ObOpenObjectByPointer( void *obj, ULONG attr, ACCESS_STATE *access_state,
+                                       ACCESS_MASK access, POBJECT_TYPE type,
+                                       KPROCESSOR_MODE mode, HANDLE *handle )
+{
+    HMODULE ntoskrnl_mod = GetModuleHandleA("ntoskrnl.exe");
+
+    NTSTATUS WINAPI (*func)(void*,ULONG,ACCESS_STATE*,ACCESS_MASK,POBJECT_TYPE,KPROCESSOR_MODE,HANDLE)
+        = GetProcAddress(ntoskrnl_mod, "ObOpenObjectByPointer");
+
+    return func(obj, attr, access_state, access, type, mode, handle);
+}
+
+NTSTATUS WINAPI FltGetFileNameInformationUnsafe( PFILE_OBJECT file_object, PFLT_INSTANCE instance, FLT_FILE_NAME_OPTIONS options, PFLT_FILE_NAME_INFORMATION *info)
+{
+    NTSTATUS stat;
+    HANDLE file;
+    DWORD path_length;
+    WCHAR *path_buffer;
+    PFLT_FILE_NAME_INFORMATION ret;
+
+    TRACE("%p %p %x %p\n", file_object, instance, options, info);
+
+    if (instance)
+        FIXME("ignoring instance.\n");
+
+    if ((stat = p_ObOpenObjectByPointer(file_object, OBJ_KERNEL_HANDLE, NULL, 0, IoFileObjectType(), KernelMode, &file)))
+    {
+        ERR("Failed to open file, stat = %x\n", stat);
+        return stat;
+    }
+
+    if (!(path_length = GetFinalPathNameByHandleW(file, NULL, 0, VOLUME_NAME_NT)))
+    {
+        CloseHandle(file);
+        ERR("Failed to get path %x\n", GetLastError());
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    /* terminator */
+    path_length++;
+
+    path_buffer = HeapAlloc( GetProcessHeap(), HEAP_ZERO_MEMORY, path_length * sizeof(WCHAR));
+    if (!(GetFinalPathNameByHandleW(file, path_buffer, path_length, VOLUME_NAME_NT)))
+    {
+        CloseHandle(file);
+        HeapFree(GetProcessHeap(), 0, path_buffer);
+        ERR("Failed to get path %x\n", GetLastError());
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    ret = HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(*ret));
+    ret->Size = sizeof(*ret);
+    ret->Format = options;
+    RtlInitUnicodeString(&ret->Name, path_buffer);
+
+    *info = ret;
+
+    CloseHandle(file);
+    return STATUS_SUCCESS;
+}
+
+void WINAPI FltReleaseFileNameInformation(PFLT_FILE_NAME_INFORMATION info)
+{
+    TRACE("%p\n", info);
+
+    if (info)
+    {
+        RtlFreeUnicodeString(&info->Name);
+        HeapFree( GetProcessHeap(), 0, info );
+    }
 }
 
 void* WINAPI FltGetRoutineAddress(LPCSTR name)
