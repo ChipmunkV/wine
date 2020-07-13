@@ -4674,6 +4674,12 @@ NTSTATUS WINAPI SeLocateProcessImageName(PEPROCESS process, UNICODE_STRING **ima
     return STATUS_NOT_IMPLEMENTED;
 }
 
+NTSTATUS WINAPI SeQueryInformationToken(PACCESS_TOKEN token, TOKEN_INFORMATION_CLASS class, PVOID *token_information)
+{
+    FIXME("stub %p %x %p\n", token, class, token_information);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
 /*********************************************************************
  *           KeFlushQueuedDpcs    (NTOSKRNL.@)
  */
