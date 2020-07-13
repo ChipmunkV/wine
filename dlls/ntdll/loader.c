@@ -1175,7 +1175,7 @@ static WINE_MODREF *alloc_module( HMODULE hModule, const UNICODE_STRING *nt_name
 
     wm->ldr.DllBase       = hModule;
     wm->ldr.SizeOfImage   = nt->OptionalHeader.SizeOfImage;
-    wm->ldr.Flags         = LDR_DONT_RESOLVE_REFS | (builtin ? LDR_WINE_INTERNAL : 0);
+    wm->ldr.Flags         = 0x4000 | LDR_DONT_RESOLVE_REFS | (builtin ? LDR_WINE_INTERNAL : 0);
     wm->ldr.TlsIndex      = -1;
     wm->ldr.LoadCount     = 1;
 
