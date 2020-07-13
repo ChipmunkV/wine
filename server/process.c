@@ -1391,6 +1391,21 @@ DECL_HANDLER(get_new_process_info)
     }
 }
 
+DECL_HANDLER(wait_proc_init)
+{
+    struct process *process;
+
+    if ((process = get_process_from_handle(req->process, 0)))
+    {
+        reply->process_state = is_process_init_done( process ) ? PROCESS_RUNNING : PROCESS_STARTING;
+        if (process->startup_state == STARTUP_IN_PROGRESS)
+        {
+            reply->init_event = alloc_handle(current->process, process->startup_info, SYNCHRONIZE, 0);
+        }
+        release_object(process);
+    }
+}
+
 /* Retrieve the new process startup info */
 DECL_HANDLER(get_startup_info)
 {

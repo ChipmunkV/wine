@@ -2299,9 +2299,24 @@ static void *create_process_object( HANDLE handle )
     PEPROCESS process;
     DWORD filename_len = 0;
     HANDLE process_file = NULL;
+    HANDLE init_event = NULL;
     NTSTATUS stat;
 
     if (!(process = alloc_kernel_object( PsProcessType, handle, sizeof(*process), 0 ))) return NULL;
+
+    SERVER_START_REQ(wait_proc_init)
+    {
+        req->process = wine_server_obj_handle(handle);
+        if (!(stat = wine_server_call(req)) && reply->process_state == PROCESS_STARTING)
+            init_event = wine_server_ptr_handle(reply->init_event);
+    }
+    SERVER_END_REQ;
+
+    if (init_event)
+    {
+        WaitForSingleObject(init_event, INFINITE);
+        CloseHandle(init_event);
+    }
 
     process->header.Type = 3;
     process->header.WaitListHead.Blink = INVALID_HANDLE_VALUE; /* mark as kernel object */
