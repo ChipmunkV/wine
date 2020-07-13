@@ -448,6 +448,11 @@ static NTSTATUS WINAPI dispatch_irp_completion( DEVICE_OBJECT *device, IRP *irp,
     void *out_buff = irp->UserBuffer;
     NTSTATUS status;
 
+    if (KeGetCurrentThread()->user_output_copy)
+        out_buff = KeGetCurrentThread()->user_output_copy;
+    if (irp->AssociatedIrp.SystemBuffer)
+        memcpy(out_buff, irp->AssociatedIrp.SystemBuffer, irp->IoStatus.Information);
+
     if (irp->Flags & IRP_WRITE_OPERATION)
         out_buff = NULL;  /* do not transfer back input buffer */
 
@@ -477,7 +482,7 @@ static NTSTATUS WINAPI dispatch_irp_completion( DEVICE_OBJECT *device, IRP *irp,
             IoSetCancelRoutine( irp, cancel_completed_irp );
     }
 
-    if (irp->UserBuffer != irp->AssociatedIrp.SystemBuffer)
+    if (!KeGetCurrentThread()->user_output_copy && irp->UserBuffer != irp->AssociatedIrp.SystemBuffer)
     {
         HeapFree( GetProcessHeap(), 0, irp->UserBuffer );
         irp->UserBuffer = NULL;
@@ -708,8 +713,9 @@ static NTSTATUS dispatch_ioctl( struct dispatch_context *context )
 {
     IO_STACK_LOCATION *irpsp;
     IRP *irp;
-    void *out_buff = NULL;
-    void *to_free = NULL;
+    void *user_in_buff_copy = NULL;
+    void *user_out_buff_copy = NULL;
+    PVOID in_buf, out_buf;
     DEVICE_OBJECT *device;
     FILE_OBJECT *file = wine_server_get_ptr( context->params.ioctl.file );
     ULONG out_size = context->params.ioctl.out_size;
@@ -721,49 +727,62 @@ static NTSTATUS dispatch_ioctl( struct dispatch_context *context )
     TRACE( "ioctl %x device %p file %p in_size %u out_size %u\n",
            context->params.ioctl.code, device, file, context->in_size, out_size );
 
+    user_in_buff_copy = context->in_buff;
+    context->in_buff = NULL;
+
     if (out_size)
     {
-        if ((context->params.ioctl.code & 3) != METHOD_BUFFERED)
+        if ((context->params.ioctl.code & 3) == METHOD_BUFFERED)
+        {
+            /* create the fake buffer copy */
+            user_out_buff_copy = HeapAlloc( GetProcessHeap(), 0, out_size );
+        }
+        else
         {
             if (context->in_size < out_size) return STATUS_INVALID_DEVICE_REQUEST;
             context->in_size -= out_size;
-            if (!(out_buff = HeapAlloc( GetProcessHeap(), 0, out_size ))) return STATUS_NO_MEMORY;
-            memcpy( out_buff, (char *)context->in_buff + context->in_size, out_size );
+            if (!(user_out_buff_copy = HeapAlloc( GetProcessHeap(), 0, out_size ))) return STATUS_NO_MEMORY;
+            memcpy( user_out_buff_copy, (char *)user_in_buff_copy + context->in_size, out_size );
+            HeapReAlloc( GetProcessHeap(), HEAP_REALLOC_IN_PLACE_ONLY, user_in_buff_copy, context->in_size );
         }
-        else if (out_size > context->in_size)
-        {
-            if (!(out_buff = HeapAlloc( GetProcessHeap(), 0, out_size ))) return STATUS_NO_MEMORY;
-            memcpy( out_buff, context->in_buff, context->in_size );
-            to_free = context->in_buff;
-            context->in_buff = out_buff;
-        }
-        else
-            out_buff = context->in_buff;
     }
 
-    irp = IoBuildDeviceIoControlRequest( context->params.ioctl.code, device, context->in_buff,
-                                         context->in_size, out_buff, out_size, FALSE, NULL, NULL );
+    in_buf = wine_server_get_ptr(context->params.ioctl.in_buf);
+    out_buf = wine_server_get_ptr(context->params.ioctl.out_buf);
+
+    KeGetCurrentThread()->user_input_copy = user_in_buff_copy;
+    KeGetCurrentThread()->user_output_copy = user_out_buff_copy;
+
+    irp = IoBuildDeviceIoControlRequest( context->params.ioctl.code, device, in_buf,
+                                context->in_size, out_buf, out_size, FALSE, NULL, NULL );
+
     if (!irp)
     {
-        HeapFree( GetProcessHeap(), 0, out_buff );
+        KeGetCurrentThread()->user_input_copy = NULL;
+        KeGetCurrentThread()->user_output_copy = NULL;
+        HeapFree( GetProcessHeap(), 0, user_out_buff_copy );
         return STATUS_NO_MEMORY;
     }
-
-    if (out_size && (context->params.ioctl.code & 3) != METHOD_BUFFERED)
-        HeapReAlloc( GetProcessHeap(), HEAP_REALLOC_IN_PLACE_ONLY, context->in_buff, context->in_size );
 
     irpsp = IoGetNextIrpStackLocation( irp );
     irpsp->FileObject = file;
 
     irp->Tail.Overlay.OriginalFileObject = file;
     irp->RequestorMode = UserMode;
-    irp->AssociatedIrp.SystemBuffer = context->in_buff;
-    context->in_buff = NULL;
 
-    irp->Flags |= IRP_DEALLOCATE_BUFFER;  /* deallocate in_buff */
+    KeGetCurrentThread()->user_input = (BYTE*) in_buf;
+    KeGetCurrentThread()->user_output = (BYTE*) out_buf;
+
+    TRACE("%p %u\n", KeGetCurrentThread()->user_output_copy, HeapSize(GetProcessHeap(), 0, KeGetCurrentThread()->user_output_copy));
+
     dispatch_irp( device, irp, context );
 
-    HeapFree( GetProcessHeap(), 0, to_free );
+    KeGetCurrentThread()->user_input = NULL;
+    KeGetCurrentThread()->user_output = NULL;
+
+    KeGetCurrentThread()->user_input_copy = NULL;
+    KeGetCurrentThread()->user_output_copy = NULL;
+    HeapFree( GetProcessHeap(), 0, user_out_buff_copy );
     return STATUS_SUCCESS;
 }
 
@@ -1309,6 +1328,7 @@ PIRP WINAPI IoBuildDeviceIoControlRequest( ULONG code, PDEVICE_OBJECT device,
     PIRP irp;
     PIO_STACK_LOCATION irpsp;
     MDL *mdl;
+    ULONG buffer_size = in_len > out_len ? in_len : out_len;
 
     TRACE( "%x, %p, %p, %u, %p, %u, %u, %p, %p\n",
            code, device, in_buff, in_len, out_buff, out_len, internal, event, iosb );
@@ -1331,11 +1351,16 @@ PIRP WINAPI IoBuildDeviceIoControlRequest( ULONG code, PDEVICE_OBJECT device,
     switch (code & 3)
     {
     case METHOD_BUFFERED:
-        irp->AssociatedIrp.SystemBuffer = in_buff;
+        irp->AssociatedIrp.SystemBuffer = HeapAlloc(GetProcessHeap(), 0, buffer_size);
+        memcpy(irp->AssociatedIrp.SystemBuffer, KeGetCurrentThread()->user_input_copy ? KeGetCurrentThread()->user_input_copy : in_buff, in_len);
+        irp->Flags |= IRP_DEALLOCATE_BUFFER;
         break;
     case METHOD_IN_DIRECT:
     case METHOD_OUT_DIRECT:
-        irp->AssociatedIrp.SystemBuffer = in_buff;
+        /* TODO: actually map into system space */
+        irp->AssociatedIrp.SystemBuffer = HeapAlloc(GetProcessHeap(), 0, in_len);
+        memcpy(irp->AssociatedIrp.SystemBuffer, KeGetCurrentThread()->user_input_copy ? KeGetCurrentThread()->user_input_copy : in_buff, in_len);
+        irp->Flags |= IRP_DEALLOCATE_BUFFER;
 
         mdl = IoAllocateMdl( out_buff, out_len, FALSE, FALSE, irp );
         if (!mdl)

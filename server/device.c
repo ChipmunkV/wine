@@ -208,7 +208,7 @@ static enum server_fd_type device_file_get_fd_type( struct fd *fd );
 static int device_file_read( struct fd *fd, struct async *async, file_pos_t pos );
 static int device_file_write( struct fd *fd, struct async *async, file_pos_t pos );
 static int device_file_flush( struct fd *fd, struct async *async );
-static int device_file_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
+static int device_file_ioctl( struct fd *fd, ioctl_code_t code, client_ptr_t in_buf, client_ptr_t out_buf, struct async *async );
 static void device_file_reselect_async( struct fd *fd, struct async_queue *queue );
 
 static const struct object_ops device_file_ops =
@@ -707,7 +707,7 @@ static int device_file_flush( struct fd *fd, struct async *async )
     return queue_irp( file, &params, async );
 }
 
-static int device_file_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
+static int device_file_ioctl( struct fd *fd, ioctl_code_t code, client_ptr_t in_buf, client_ptr_t out_buf, struct async *async )
 {
     struct device_file *file = get_fd_user( fd );
     irp_params_t params;
@@ -715,6 +715,8 @@ static int device_file_ioctl( struct fd *fd, ioctl_code_t code, struct async *as
     memset( &params, 0, sizeof(params) );
     params.ioctl.type = IRP_CALL_IOCTL;
     params.ioctl.code = code;
+    params.ioctl.in_buf = in_buf;
+    params.ioctl.out_buf = out_buf;
     return queue_irp( file, &params, async );
 }
 

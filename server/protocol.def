@@ -735,6 +735,8 @@ typedef union
     {
         enum irp_type    type;      /* IRP_CALL_IOCTL */
         ioctl_code_t     code;      /* ioctl code */
+        client_ptr_t     in_buf;
+        client_ptr_t     out_buf;
         data_size_t      out_size;  /* needed output size */
         int              __pad;
         client_ptr_t     file;      /* opaque ptr for the file object */
@@ -2206,6 +2208,8 @@ enum message_type
 @REQ(ioctl)
     ioctl_code_t   code;          /* ioctl code */
     async_data_t   async;         /* async I/O parameters */
+    client_ptr_t   input_buffer;  /* user space address of input buffer */
+    client_ptr_t   output_buffer; /* user space address of output buffer */
     VARARG(in_data,bytes);        /* ioctl input data */
 @REPLY
     obj_handle_t   wait;          /* handle to wait on for blocking ioctl */

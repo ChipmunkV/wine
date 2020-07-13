@@ -63,6 +63,8 @@ struct _KTHREAD
     CRITICAL_SECTION apc_cs;
     HANDLE apc_event;
     HANDLE imposter_thread;
+    PVOID user_input_copy, user_output_copy;
+    PBYTE user_input, user_output;
 };
 
 struct _ETHREAD

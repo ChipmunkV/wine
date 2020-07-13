@@ -100,7 +100,7 @@ static const struct object_ops console_input_ops =
 static enum server_fd_type console_get_fd_type( struct fd *fd );
 static int console_input_read( struct fd *fd, struct async *async, file_pos_t pos );
 static int console_input_flush( struct fd *fd, struct async *async );
-static int console_input_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
+static int console_input_ioctl( struct fd *fd, ioctl_code_t code, client_ptr_t in_buf, client_ptr_t out_buf, struct async *async );
 
 static const struct fd_ops console_input_fd_ops =
 {
@@ -169,7 +169,7 @@ static const struct object_ops console_server_ops =
     console_server_destroy            /* destroy */
 };
 
-static int console_server_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
+static int console_server_ioctl( struct fd *fd, ioctl_code_t code, client_ptr_t in_buf, client_ptr_t out_buf, struct async *async );
 
 static const struct fd_ops console_server_fd_ops =
 {
@@ -238,7 +238,7 @@ static const struct object_ops screen_buffer_ops =
 };
 
 static int screen_buffer_write( struct fd *fd, struct async *async, file_pos_t pos );
-static int screen_buffer_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
+static int screen_buffer_ioctl( struct fd *fd, ioctl_code_t code, client_ptr_t in_buf, client_ptr_t out_buf, struct async *async );
 
 static const struct fd_ops screen_buffer_fd_ops =
 {
@@ -383,7 +383,7 @@ static const struct object_ops console_connection_ops =
     console_connection_destroy        /* destroy */
 };
 
-static int console_connection_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
+static int console_connection_ioctl( struct fd *fd, ioctl_code_t code, client_ptr_t in_buf, client_ptr_t out_buf, struct async *async );
 
 static const struct fd_ops console_connection_fd_ops =
 {
@@ -879,7 +879,7 @@ static int is_blocking_read_ioctl( unsigned int code )
     }
 }
 
-static int console_input_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
+static int console_input_ioctl( struct fd *fd, ioctl_code_t code, client_ptr_t in_buf, client_ptr_t out_buf, struct async *async )
 {
     struct console_input *console = get_fd_user( fd );
 
@@ -963,7 +963,7 @@ static int screen_buffer_write( struct fd *fd, struct async *async, file_pos_t p
     return 1;
 }
 
-static int screen_buffer_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
+static int screen_buffer_ioctl( struct fd *fd, ioctl_code_t code, client_ptr_t in_buf, client_ptr_t out_buf, struct async *async )
 {
     struct screen_buffer *screen_buffer = get_fd_user( fd );
 
@@ -991,7 +991,7 @@ static int screen_buffer_ioctl( struct fd *fd, ioctl_code_t code, struct async *
     }
 }
 
-static int console_connection_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
+static int console_connection_ioctl( struct fd *fd, ioctl_code_t code, client_ptr_t in_buf, client_ptr_t out_buf, struct async *async )
 {
     struct console_connection *console_connection = get_fd_user( fd );
 
@@ -1027,11 +1027,11 @@ static int console_connection_ioctl( struct fd *fd, ioctl_code_t code, struct as
         }
 
     default:
-        return default_fd_ioctl( console_connection->fd, code, async );
+        return default_fd_ioctl( console_connection->fd, code, in_buf, out_buf, async );
     }
 }
 
-static int console_server_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
+static int console_server_ioctl( struct fd *fd, ioctl_code_t code, client_ptr_t in_buf, client_ptr_t out_buf, struct async *async )
 {
     struct console_server *server = get_fd_user( fd );
 

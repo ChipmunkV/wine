@@ -4734,6 +4734,8 @@ static NTSTATUS server_ioctl_file( HANDLE handle, HANDLE event,
     {
         req->code        = code;
         req->async       = server_async( handle, &async->io, event, apc, apc_context, io );
+        req->input_buffer = wine_server_client_ptr(in_buffer);
+        req->output_buffer = wine_server_client_ptr(out_buffer);
         wine_server_add_data( req, in_buffer, in_size );
         if ((code & 3) != METHOD_BUFFERED) wine_server_add_data( req, out_buffer, out_size );
         wine_server_set_reply( req, out_buffer, out_size );

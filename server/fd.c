@@ -2330,14 +2330,14 @@ void no_fd_get_volume_info( struct fd *fd, unsigned int info_class )
 }
 
 /* default ioctl() routine */
-int no_fd_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
+int no_fd_ioctl( struct fd *fd, ioctl_code_t code, client_ptr_t in_buf, client_ptr_t out_buf, struct async *async )
 {
     set_error( STATUS_OBJECT_TYPE_MISMATCH );
     return 0;
 }
 
 /* default ioctl() routine */
-int default_fd_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
+int default_fd_ioctl( struct fd *fd, ioctl_code_t code, client_ptr_t in_buf, client_ptr_t out_buf, struct async *async )
 {
     switch(code)
     {
@@ -2731,7 +2731,7 @@ DECL_HANDLER(ioctl)
 
     if ((async = create_request_async( fd, fd->comp_flags, &req->async )))
     {
-        reply->wait    = async_handoff( async, fd->fd_ops->ioctl( fd, req->code, async ), NULL, 0 );
+        reply->wait    = async_handoff( async, fd->fd_ops->ioctl( fd, req->code, req->input_buffer, req->output_buffer, async ), NULL, 0 );
         reply->options = fd->options;
         release_object( async );
     }

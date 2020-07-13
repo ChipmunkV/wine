@@ -63,7 +63,7 @@ static struct fd *serial_get_fd( struct object *obj );
 static void serial_destroy(struct object *obj);
 
 static enum server_fd_type serial_get_fd_type( struct fd *fd );
-static int serial_ioctl( struct fd *fd, ioctl_code_t code, struct async *async );
+static int serial_ioctl( struct fd *fd, ioctl_code_t code, client_ptr_t in_buf, client_ptr_t out_buf, struct async *async );
 static void serial_queue_async( struct fd *fd, struct async *async, int type, int count );
 static void serial_reselect_async( struct fd *fd, struct async_queue *queue );
 
@@ -179,7 +179,7 @@ static enum server_fd_type serial_get_fd_type( struct fd *fd )
     return FD_TYPE_SERIAL;
 }
 
-static int serial_ioctl( struct fd *fd, ioctl_code_t code, struct async *async )
+static int serial_ioctl( struct fd *fd, ioctl_code_t code, client_ptr_t in_buf, client_ptr_t out_buf, struct async *async )
 {
     struct serial *serial = get_fd_user( fd );
 
