@@ -5280,6 +5280,11 @@ void WINAPI ExReleaseRundownProtection(PVOID runref)
     FIXME("stub! (%p)\n", runref);
 }
 
+KPROCESSOR_MODE WINAPI ExGetPreviousMode(void)
+{
+    return ((PKTHREAD)NtCurrentTeb()->SystemReserved1[15])->prev_mode;
+}
+
 BOOLEAN WINAPI ExEnumHandleTable(PVOID handle_table, PVOID handle_proc, PVOID param, PHANDLE last_handle)
 {
     FIXME("stub! (%p %p %p %p)\n", handle_table, handle_proc, param, last_handle);

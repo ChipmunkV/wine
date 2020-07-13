@@ -62,6 +62,7 @@ struct _KTHREAD
     DISPATCHER_HEADER header;
     /* padding to require a 32-bit displacement */
     CHAR padding[0x100 - sizeof(DISPATCHER_HEADER)];
+    KPROCESSOR_MODE prev_mode;
     PEPROCESS process;
     CLIENT_ID id;
     unsigned int critical_region;
