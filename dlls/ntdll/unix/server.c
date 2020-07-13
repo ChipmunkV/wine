@@ -893,7 +893,7 @@ static union fd_cache_entry fd_cache_initial_block[FD_CACHE_BLOCK_SIZE];
 
 static inline unsigned int handle_to_index( HANDLE handle, unsigned int *entry )
 {
-    unsigned int idx = (wine_server_obj_handle(handle) >> 2) - 1;
+    unsigned int idx = ((wine_server_obj_handle(handle) & ~KERNEL_HANDLE_FLAG) >> 2) - 1;
     *entry = idx / FD_CACHE_BLOCK_SIZE;
     return idx % FD_CACHE_BLOCK_SIZE;
 }

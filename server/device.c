@@ -1240,7 +1240,30 @@ DECL_HANDLER(get_kernel_object_handle)
         return;
 
     if ((ref = kernel_object_from_ptr( manager, req->user_ptr )))
-        reply->handle = alloc_handle( current->process, ref->object, req->access, 0 );
+    {
+        if (req->attributes & OBJ_KERNEL_HANDLE)
+            reply->handle = alloc_handle( current->process, ref->object, req->access, 0 );
+        else
+        {
+            struct thread *client_thread;
+            struct process *user_process = NULL;
+
+            if (current->attached_process)
+            {
+                user_process = current->attached_process;
+            }
+            else if ((client_thread = device_manager_client_thread(manager, current)))
+            {
+                user_process = client_thread->process;
+                release_object(client_thread);
+            }
+            else
+                set_error(STATUS_INVALID_PARAMETER);
+
+            if (user_process)
+                reply->handle = alloc_handle( user_process, ref->object, req->access, req->attributes );
+        }
+    }
     else
         set_error( STATUS_INVALID_HANDLE );
 
@@ -1442,7 +1465,7 @@ DECL_HANDLER(get_next_callback_event)
     release_object( manager );
 }
 
-static struct thread *device_manager_client_thread(struct device_manager *dev_mgr, struct thread *thread)
+struct thread *device_manager_client_thread(struct device_manager *dev_mgr, struct thread *thread)
 {
     if (thread != dev_mgr->main_loop_thread)
         return NULL;

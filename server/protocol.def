@@ -1079,6 +1079,8 @@ typedef struct
     apc_result_t result;       /* result of the APC */
 @END
 
+#define KERNEL_HANDLE_FLAG 0x8000000
+
 
 /* Close a handle for the current process */
 @REQ(close_handle)
@@ -3404,6 +3406,7 @@ struct handle_info
     obj_handle_t manager;         /* handle to the device manager */
     client_ptr_t user_ptr;        /* kernel object pointer */
     unsigned int access;          /* wanted access rights */
+    unsigned int attributes;
 @REPLY
     obj_handle_t handle;          /* kernel object handle */
 @END

@@ -2253,6 +2253,9 @@ typedef struct _RTL_HANDLE_TABLE
 #define OBJ_KERNEL_HANDLE    0x00000200
 #define OBJ_VALID_ATTRIBUTES 0x000003F2
 
+/* wine extension */
+#define OBJ_FROM_KERNEL      0x80000000
+
 #define SERVERNAME_CURRENT ((HANDLE)NULL)
 
 typedef void (CALLBACK *PNTAPCFUNC)(ULONG_PTR,ULONG_PTR,ULONG_PTR); /* FIXME: not the right name */

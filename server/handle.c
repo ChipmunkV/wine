@@ -37,6 +37,7 @@
 #include "process.h"
 #include "thread.h"
 #include "security.h"
+#include "device.h"
 #include "request.h"
 
 struct handle_entry
@@ -258,15 +259,29 @@ static obj_handle_t alloc_handle_entry( struct process *process, void *ptr,
                                         unsigned int access, unsigned int attr )
 {
     struct object *obj = ptr;
+    obj_handle_t res;
 
     assert( !(access & RESERVED_ALL) );
     if (attr & OBJ_INHERIT) access |= RESERVED_INHERIT;
+
+    if (attr & OBJ_FROM_KERNEL)
+    {
+        if (current->process == process && process->is_kernel && current->attached_process && !(attr & OBJ_KERNEL_HANDLE))
+        {
+            process = current->attached_process;
+        }
+    }
+
     if (!process->handles)
     {
         set_error( STATUS_PROCESS_IS_TERMINATING );
         return 0;
     }
-    return alloc_entry( process->handles, obj, access );
+    res = alloc_entry( process->handles, obj, access );
+    if (process->is_kernel)
+        res |= KERNEL_HANDLE_FLAG;
+
+    return res;
 }
 
 void queue_handle_callback(struct process *process, struct object *obj, unsigned int access, obj_handle_t res)
@@ -349,10 +364,44 @@ static struct handle_entry *get_handle( struct process *process, obj_handle_t ha
     struct handle_entry *entry;
     int index;
 
+    if (handle == 0)
+        return NULL;
+
     if (handle_is_global(handle))
     {
         handle = handle_global_to_local(handle);
         table = global_table;
+    }
+    if (process->is_kernel)
+    {
+        if (handle & KERNEL_HANDLE_FLAG)
+            handle &= ~KERNEL_HANDLE_FLAG;
+        else
+        {
+            struct thread *client_thread;
+
+            if (!process->dev_mgr)
+            {
+                set_error( STATUS_INVALID_HANDLE );
+                return NULL;
+            }
+
+            if (current->attached_process)
+            {
+                process = current->attached_process;
+            }
+            else if ((client_thread = device_manager_client_thread(process->dev_mgr, current)))
+            {
+                process = client_thread->process;
+                release_object(client_thread);
+            }
+            else
+            {
+                set_error( STATUS_INVALID_HANDLE );
+                return NULL;
+            }
+
+        }
     }
     if (!table) return NULL;
     index = handle_to_index( handle );
