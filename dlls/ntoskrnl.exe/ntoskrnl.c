@@ -3049,8 +3049,8 @@ BOOLEAN WINAPI MmIsAddressValid(PVOID VirtualAddress)
  */
 PVOID WINAPI MmMapIoSpace( PHYSICAL_ADDRESS PhysicalAddress, DWORD NumberOfBytes, DWORD CacheType )
 {
-    FIXME( "stub: 0x%08x%08x, %d, %d\n", PhysicalAddress.u.HighPart, PhysicalAddress.u.LowPart, NumberOfBytes, CacheType );
-    return NULL;
+    FIXME( "semi-stub: 0x%08x%08x, %d, %d\n", PhysicalAddress.u.HighPart, PhysicalAddress.u.LowPart, NumberOfBytes, CacheType );
+    return (PBYTE)PhysicalAddress.QuadPart >= (PBYTE)MmSystemRangeStart ? (PBYTE)PhysicalAddress.QuadPart : NULL;
 }
 
 
