@@ -60,6 +60,8 @@ struct _EPROCESS
 struct _KTHREAD
 {
     DISPATCHER_HEADER header;
+    /* padding to require a 32-bit displacement */
+    CHAR padding[0x100 - sizeof(DISPATCHER_HEADER)];
     PEPROCESS process;
     CLIENT_ID id;
     unsigned int critical_region;

@@ -2544,6 +2544,17 @@ PEPROCESS WINAPI IoGetCurrentProcess(void)
     return KeGetCurrentThread()->process;
 }
 
+#ifndef __x86_64__
+PEPROCESS WINAPI IoThreadToProcess(PETHREAD thread)
+{
+    return thread->kthread.process;
+}
+#else
+__ASM_GLOBAL_FUNC(IoThreadToProcess,
+                  "movq 0x168(%rcx),%rax\n\t"
+                  "ret")
+#endif
+
 /***********************************************************************
  *           PsLookupProcessByProcessId  (NTOSKRNL.EXE.@)
  */
