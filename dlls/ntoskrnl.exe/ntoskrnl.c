@@ -4615,7 +4615,7 @@ NTSTATUS WINAPI PsAcquireProcessExitSynchronization(PEPROCESS process)
 {
     FIXME("stub: %p\n", process);
 
-    return STATUS_NOT_IMPLEMENTED;
+    return STATUS_SUCCESS;
 }
 
 /*********************************************************************
