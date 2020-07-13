@@ -434,6 +434,18 @@ NTSTATUS WINAPI ObOpenObjectByPointer( void *obj, ULONG attr, ACCESS_STATE *acce
     return status;
 }
 
+NTSTATUS WINAPI ObCloseHandle( HANDLE handle, KPROCESSOR_MODE mode )
+{
+    TRACE("%p %u\n", handle, mode);
+
+    if (mode != KernelMode && (ULONG_PTR)handle & KERNEL_HANDLE_FLAG)
+        return STATUS_ACCESS_DENIED;
+    if (mode != UserMode && !((ULONG_PTR)handle & KERNEL_HANDLE_FLAG))
+        return STATUS_INVALID_PARAMETER;
+
+    return NtClose(handle);
+}
+
 
 static void *create_file_object( HANDLE handle );
 
