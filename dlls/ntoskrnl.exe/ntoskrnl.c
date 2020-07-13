@@ -2529,6 +2529,9 @@ static void *create_thread_object( HANDLE handle )
 
     if (!(thread = alloc_kernel_object( PsThreadType, handle, sizeof(*thread), 0 ))) return NULL;
 
+    /* try to elevate permission */
+    ObOpenObjectByPointer(thread, OBJ_KERNEL_HANDLE, NULL, THREAD_QUERY_INFORMATION, PsThreadType, KernelMode, &handle);
+
     SERVER_START_REQ(wait_thread_init)
     {
         req->thread = wine_server_obj_handle(handle);
