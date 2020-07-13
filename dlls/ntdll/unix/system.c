@@ -2657,6 +2657,34 @@ NTSTATUS WINAPI NtQuerySystemInformation( SYSTEM_INFORMATION_CLASS class,
         break;
     }
 
+    case SystemBootEnvironmentInformation:
+    {
+        SYSTEM_BOOT_ENVIRONMENT_INFORMATION sbei;
+        sbei.FirmwareType = FirmwareTypeUefi;
+        sbei.BootFlags = 0x1;
+        sbei.BootIdentifier.Data1 = 0xdeadbeef;
+        sbei.BootIdentifier.Data2 = 0xdead;
+        sbei.BootIdentifier.Data3 = 0xbeef;
+        sbei.BootIdentifier.Data4[0] = 0xde;
+        sbei.BootIdentifier.Data4[1] = 0xad;
+        sbei.BootIdentifier.Data4[2] = 0xbe;
+        sbei.BootIdentifier.Data4[3] = 0xef;
+        sbei.BootIdentifier.Data4[4] = 0xde;
+        sbei.BootIdentifier.Data4[5] = 0xad;
+        sbei.BootIdentifier.Data4[6] = 0xbe;
+        sbei.BootIdentifier.Data4[7] = 0xef;
+
+        len = sizeof(sbei);
+
+        if (size >= len)
+        {
+            if (!info) ret = STATUS_ACCESS_VIOLATION;
+            else memcpy(info, &sbei, len);
+        }
+        else ret = STATUS_INFO_LENGTH_MISMATCH;
+        break;
+    }
+
     case SystemDynamicTimeZoneInformation:
     {
         RTL_DYNAMIC_TIME_ZONE_INFORMATION tz;
