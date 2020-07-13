@@ -29,6 +29,12 @@ static inline LPCSTR debugstr_us( const UNICODE_STRING *us )
     return debugstr_wn( us->Buffer, us->Length / sizeof(WCHAR) );
 }
 
+#define TO_USER(x) (typeof(x)) ((ULONG_PTR)x & 0x0000ffffffffffff)
+#define TO_KRNL(x) (PVOID) (x ? (ULONG_PTR)x | 0xffff000000000000 : (ULONG_PTR)x)
+typedef void (*kernel_struct_accessed)(void *base, DWORD offset, BOOL write, void *ip);
+
+void *register_kernel_struct(void *obj, unsigned int size, kernel_struct_accessed callback);
+void forget_kernel_struct(void *obj);
 struct _OBJECT_TYPE
 {
     const WCHAR *name;            /* object type name used for type validation */

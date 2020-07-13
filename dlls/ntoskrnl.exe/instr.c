@@ -32,6 +32,9 @@
 #include "excpt.h"
 #include "wine/debug.h"
 #include "wine/exception.h"
+#include "wine/rbtree.h"
+
+#include "ntoskrnl_private.h"
 
 #define KSHARED_USER_DATA_PAGE_SIZE 0x1000
 
@@ -478,9 +481,81 @@ LONG CALLBACK vectored_handler( EXCEPTION_POINTERS *ptrs )
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+void *register_kernel_struct(void *obj, unsigned int size, kernel_struct_accessed callback)
+{
+    return obj;
+}
+
+void forget_kernel_struct(void *obj)
+{
+    return;
+}
+
 #elif defined(__x86_64__)  /* __i386__ */
 
 WINE_DEFAULT_DEBUG_CHANNEL(int);
+
+struct kernel_struct
+{
+    BYTE *base;
+    unsigned int size;
+    kernel_struct_accessed callback;
+    struct wine_rb_entry entry;
+};
+
+static int compare_kernel_struct( const void *key, const struct wine_rb_entry *entry )
+{
+    const struct kernel_struct *kernel_struct = WINE_RB_ENTRY_VALUE( entry, const struct kernel_struct, entry );
+    const BYTE *access_address = key;
+
+    if (access_address < kernel_struct->base)
+        return -1;
+    else if (access_address < (kernel_struct->base + kernel_struct->size))
+        return 0;
+    else
+        return 1;
+}
+
+static struct wine_rb_tree kernel_structs = {compare_kernel_struct};
+
+static struct kernel_struct *get_kernel_struct (void *addr)
+{
+    struct wine_rb_entry *entry = wine_rb_get(&kernel_structs, addr);
+    return entry ? WINE_RB_ENTRY_VALUE( entry, struct kernel_struct, entry ) : NULL;
+}
+
+void *register_kernel_struct(void *base, unsigned int size, kernel_struct_accessed callback)
+{
+    struct kernel_struct *new_struct;
+
+    base = TO_KRNL(base);
+
+    TRACE("(%p, %u)\n", base, size);
+
+    if ((get_kernel_struct(base)))
+        return NULL;
+
+    new_struct = HeapAlloc(GetProcessHeap(), 0, (sizeof(*new_struct)));
+    new_struct->base = base;
+    new_struct->size = size;
+    new_struct->callback = callback;
+
+    wine_rb_put(&kernel_structs, new_struct->base, &new_struct->entry);
+
+    return base;
+}
+
+void forget_kernel_struct(void *obj)
+{
+    struct kernel_struct *kernel_struct = get_kernel_struct(obj);
+
+    if (obj != kernel_struct->base)
+        return;
+
+    wine_rb_remove(&kernel_structs, &kernel_struct->entry);
+    HeapFree(GetProcessHeap(), 0, kernel_struct);
+    return;
+}
 
 #define REX_B   1
 #define REX_X   2
