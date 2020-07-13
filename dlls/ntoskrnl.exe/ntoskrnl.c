@@ -1900,6 +1900,46 @@ NTSTATUS WINAPI IoQueryDeviceDescription(PINTERFACE_TYPE itype, PULONG bus, PCON
     return STATUS_NOT_IMPLEMENTED;
 }
 
+NTSTATUS WINAPI IoQueryFileDosDeviceName(PFILE_OBJECT object, POBJECT_NAME_INFORMATION *name_info)
+{
+    HANDLE file_handle;
+    NTSTATUS stat;
+    DWORD path_length;
+    WCHAR *path_buffer;
+    static WCHAR dosdevice_format[] = L"\\DosDevices\\C:";
+    POBJECT_NAME_INFORMATION ret;
+
+    TRACE("%p %p\n", object, name_info);
+
+    if ((stat = ObOpenObjectByPointer(object, OBJ_KERNEL_HANDLE, NULL, 0, IoFileObjectType, KernelMode, &file_handle)))
+        return stat;
+
+    path_length = GetFinalPathNameByHandleW(file_handle, NULL, 0, VOLUME_NAME_DOS);
+    if (!path_length)
+    {
+        CloseHandle(file_handle);
+        return STATUS_NOT_IMPLEMENTED;
+    }
+
+    path_buffer = HeapAlloc( GetProcessHeap(), 0, path_length * sizeof(WCHAR));
+    GetFinalPathNameByHandleW(file_handle, path_buffer, path_length, VOLUME_NAME_DOS);
+
+    ret = ExAllocatePool(PagedPool, sizeof(*name_info) + sizeof(dosdevice_format));
+    memcpy(ret + 1, dosdevice_format, sizeof(dosdevice_format));
+    RtlInitUnicodeString(&ret->Name, (PWSTR)(ret + 1));
+
+    if (!(swscanf(path_buffer, L"\\\\?\\%c", &ret->Name.Buffer[12])))
+        ERR("Failed to parse file path, reporting C drive.\n");
+    TRACE("%s\n", debugstr_us(&ret->Name));
+
+    HeapFree( GetProcessHeap(), 0, path_buffer );
+    CloseHandle(file_handle);
+
+    *name_info = ret;
+
+    return STATUS_SUCCESS;
+}
+
 /***********************************************************************
  *           IoRegisterDriverReinitialization    (NTOSKRNL.EXE.@)
  */
