@@ -2687,6 +2687,8 @@ static void *create_thread_object( HANDLE handle )
     InitializeListHead(&thread->ApcListHead[KernelMode]);
     InitializeListHead(&thread->ApcListHead[UserMode]);
 
+    thread->bruh = 2;
+
     return thread;
 }
 

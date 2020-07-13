@@ -61,7 +61,8 @@ struct _KTHREAD
 {
     DISPATCHER_HEADER header;
     /* padding to require a 32-bit displacement */
-    CHAR padding[0x100 - sizeof(DISPATCHER_HEADER)];
+    CHAR padding[356 - sizeof(DISPATCHER_HEADER)];
+    BYTE bruh;
     KPROCESSOR_MODE prev_mode;
     PEPROCESS process;
     CLIENT_ID id;
