@@ -31,6 +31,7 @@ struct thread_apc;
 struct debug_ctx;
 struct debug_event;
 struct msg_queue;
+struct startup_info;
 
 enum run_state
 {
@@ -94,6 +95,7 @@ struct thread
     WCHAR                 *desc;          /* thread description string */
     struct object         *callback_init_event;
     struct process *       attached_process;
+    struct startup_info   *startup_info;
 };
 
 extern struct thread *current;

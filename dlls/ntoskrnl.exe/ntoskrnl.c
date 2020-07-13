@@ -2450,8 +2450,24 @@ static void *create_thread_object( HANDLE handle )
     THREAD_BASIC_INFORMATION info;
     struct _KTHREAD *thread;
     HANDLE process;
+    HANDLE init_event = NULL;
+    NTSTATUS stat;
 
     if (!(thread = alloc_kernel_object( PsThreadType, handle, sizeof(*thread), 0 ))) return NULL;
+
+    SERVER_START_REQ(wait_thread_init)
+    {
+        req->thread = wine_server_obj_handle(handle);
+        if (!(stat = wine_server_call(req)) && reply->thread_state == THREAD_STARTING)
+            init_event = wine_server_ptr_handle(reply->init_event);
+    }
+    SERVER_END_REQ;
+
+    if (init_event)
+    {
+        WaitForSingleObject(init_event, INFINITE);
+        CloseHandle(init_event);
+    }
 
     thread->header.Type = 6;
     thread->header.WaitListHead.Blink = INVALID_HANDLE_VALUE; /* mark as kernel object */

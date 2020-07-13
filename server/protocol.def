@@ -855,6 +855,17 @@ typedef struct
 #define PROCESS_STARTING 0x0
 #define PROCESS_RUNNING  0x1
 
+@REQ(wait_thread_init)
+    obj_handle_t thread;
+@REPLY
+    unsigned int thread_state;
+    obj_handle_t init_event;
+@END
+
+#define THREAD_STARTING 0x0
+#define THREAD_RUNNING  0x1
+
+
 /* Create a new thread */
 @REQ(new_thread)
     obj_handle_t process;      /* process in which to create thread */

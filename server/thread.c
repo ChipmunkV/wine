@@ -212,6 +212,42 @@ static const struct fd_ops thread_fd_ops =
     NULL                        /* reselect_async */
 };
 
+/* thread startup info, right now only used for waiting */
+
+struct startup_info
+{
+    struct object obj;
+    struct thread *thread;
+};
+
+static void startup_info_dump( struct object *obj, int verbose );
+static int startup_info_signaled( struct object *obj, struct wait_queue_entry *entry );
+static void startup_info_destroy( struct object *obj );
+
+static const struct object_ops startup_info_ops =
+{
+    sizeof(struct startup_info),   /* size */
+    startup_info_dump,             /* dump */
+    no_get_type,                   /* get_type */
+    add_queue,                     /* add_queue */
+    remove_queue,                  /* remove_queue */
+    startup_info_signaled,         /* signaled */
+    NULL,                          /* get_esync_fd */
+    no_satisfied,                  /* satisfied */
+    no_signal,                     /* signal */
+    no_get_fd,                     /* get_fd */
+    no_map_access,                 /* map_access */
+    default_get_sd,                /* get_sd */
+    default_set_sd,                /* set_sd */
+    no_lookup_name,                /* lookup_name */
+    no_link_name,                  /* link_name */
+    NULL,                          /* unlink_name */
+    no_open_file,                  /* open_file */
+    no_kernel_obj_list,            /* get_kernel_obj_list */
+    no_close_handle,               /* close_handle */
+    startup_info_destroy           /* destroy */
+};
+
 static struct list thread_list = LIST_INIT(thread_list);
 
 /* initialize the structure for a newly allocated thread */
@@ -247,6 +283,7 @@ static inline void init_thread_structure( struct thread *thread )
     thread->desc_len        = 0;
     thread->attached_process = NULL;
     thread->callback_init_event = NULL;
+    thread->startup_info = NULL;
 
     thread->creation_time = current_time;
     thread->exit_time     = 0;
@@ -358,8 +395,16 @@ struct thread *create_thread( int fd, struct process *process, const struct secu
         release_object( thread );
         return NULL;
     }
+
+    if (!(thread->startup_info = alloc_object( &startup_info_ops )))
+    {
+        release_object(thread);
+        return NULL;
+    }
+    thread->startup_info->thread = (struct thread *)grab_object(thread);
     if (!(thread->request_fd = create_anonymous_fd( &thread_fd_ops, fd, &thread->obj, 0 )))
     {
+        release_object(thread->startup_info);
         release_object( thread );
         return NULL;
     }
@@ -382,6 +427,26 @@ struct thread *create_thread( int fd, struct process *process, const struct secu
     }
 
     return thread;
+}
+
+static void startup_info_destroy( struct object *obj )
+{
+    struct startup_info *info = (struct startup_info *)obj;
+    assert( obj->ops == &startup_info_ops );
+    if (info->thread) release_object( info->thread );
+}
+
+static void startup_info_dump( struct object *obj, int verbose )
+{
+    assert( obj->ops == &startup_info_ops );
+
+    fprintf( stderr, "Startup info, thread\n");
+}
+
+static int startup_info_signaled( struct object *obj, struct wait_queue_entry *entry )
+{
+    struct startup_info *info = (struct startup_info *)obj;
+    return info->thread && info->thread->unix_tid != -1;
 }
 
 /* handle a client event */
@@ -1515,6 +1580,13 @@ DECL_HANDLER(init_thread)
     }
     debug_level = max( debug_level, req->debug_level );
 
+    if (current->startup_info)
+    {
+        wake_up( &current->startup_info->obj, 0 );
+        release_object( current->startup_info );
+        current->startup_info = NULL;
+    }
+
     if (current->callback_init_event)
     {
         reply->processed_event = alloc_handle(current->process, current->callback_init_event, SYNCHRONIZE, 0);
@@ -1559,6 +1631,21 @@ DECL_HANDLER(open_thread)
     {
         reply->handle = alloc_handle( current->process, thread, req->access, req->attributes );
         release_object( thread );
+    }
+}
+
+DECL_HANDLER(wait_thread_init)
+{
+    struct thread *thread;
+
+    if ((thread = get_thread_from_handle(req->thread, 0)))
+    {
+        reply->thread_state = thread->unix_pid == -1 ? THREAD_STARTING : THREAD_RUNNING;
+        if (reply->thread_state == THREAD_STARTING)
+        {
+            reply->init_event = alloc_handle(current->process, thread->startup_info, SYNCHRONIZE, 0);
+        }
+        release_object(thread);
     }
 }
 
