@@ -499,7 +499,7 @@
 @ stub IoWMIExecuteMethod
 @ stub IoWMIHandleToInstanceName
 @ stdcall IoWMIOpenBlock(ptr long ptr)
-@ stub IoWMIQueryAllData
+@ stdcall IoWMIQueryAllData(ptr ptr ptr)
 @ stub IoWMIQueryAllDataMultiple
 @ stub IoWMIQuerySingleInstance
 @ stub IoWMIQuerySingleInstanceMultiple
