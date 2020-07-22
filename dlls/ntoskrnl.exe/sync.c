@@ -713,7 +713,7 @@ static DWORD WINAPI thread_impersonate_loop(PVOID context)
         if (nrml_routine && apc->ApcMode == KernelMode)
         {
             TRACE("\1%04x:%04x:Call kernel APC NormalRoutine %p\n", thread->process->info.UniqueProcessId, thread->id.UniqueThread, nrml_routine);
-            nrml_routine(nrml_ctx, sysarg1, sysarg1);
+            nrml_routine(nrml_ctx, sysarg1, sysarg2);
             TRACE("\1%04x:%04x:Ret kernel APC NormalRoutine %p\n", thread->process->info.UniqueProcessId, thread->id.UniqueThread, nrml_routine);
         }
 
