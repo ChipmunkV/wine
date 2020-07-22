@@ -1032,6 +1032,7 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
 {
     struct dispatch_context context;
     NTSTATUS status = STATUS_SUCCESS;
+    NTSTATUS cb_stat = STATUS_SUCCESS;
     WCHAR image_path[MAX_PATH];
     HANDLE handles[2];
     manager = get_device_manager();
@@ -1063,7 +1064,7 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
         {
             req->manager  = wine_server_obj_handle( manager );
             wine_server_set_reply(req, image_path, sizeof(image_path));
-            if (!(status = wine_server_call(req)))
+            if (!(cb_stat = wine_server_call(req)))
             {
                 client_tid = reply->client_tid;
                 if (!client_tid)
@@ -1076,7 +1077,7 @@ NTSTATUS CDECL wine_ntoskrnl_main_loop( HANDLE stop_event )
         }
         SERVER_END_REQ;
 
-        if (status == STATUS_SUCCESS)
+        if (cb_stat == STATUS_SUCCESS)
             continue;
 
         SERVER_START_REQ( get_next_device_request )
