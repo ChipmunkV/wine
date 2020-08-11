@@ -1401,7 +1401,6 @@ static void test_topology_loader(void)
     IMFPresentationDescriptor *pd;
     IMFSourceResolver *resolver;
     IMFActivate *sink_activate;
-    IMFStreamSink *stream_sink;
     unsigned int count, value;
     IMFMediaType *media_type;
     IMFStreamDescriptor *sd;
@@ -1516,19 +1515,15 @@ todo_wine
     hr = IMFActivate_ActivateObject(sink_activate, &IID_IMFMediaSink, (void **)&sink);
     ok(hr == S_OK, "Failed to activate, hr %#x.\n", hr);
 
-    hr = IMFMediaSink_GetStreamSinkByIndex(sink, 0, &stream_sink);
-    ok(hr == S_OK, "Unexpected hr %#x.\n", hr);
-
-    hr = IMFTopologyNode_SetObject(sink_node, (IUnknown *)stream_sink);
+    hr = IMFTopologyNode_SetObject(sink_node, (IUnknown *)sink);
     ok(hr == S_OK, "Failed to set object, hr %#x.\n", hr);
-
-    IMFStreamSink_Release(stream_sink);
 
     hr = IMFTopology_GetCount(topology, &count);
     ok(hr == S_OK, "Failed to get attribute count, hr %#x.\n", hr);
     ok(count == 0, "Unexpected count %u.\n", count);
 
     hr = IMFTopoLoader_Load(loader, topology, &full_topology, NULL);
+todo_wine
     ok(hr == S_OK, "Failed to resolve topology, hr %#x.\n", hr);
     ok(full_topology != topology, "Unexpected instance.\n");
 
