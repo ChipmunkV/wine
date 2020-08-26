@@ -433,6 +433,8 @@ static HRESULT m4s2_decoder_create(REFIID riid, void **ret)
 
 static GUID CLSID_CColorConvertDMO = {0x98230571,0x0087,0x4204,{0xb0,0x20,0x32,0x82,0x53,0x8e,0x57,0xd3}};
 
+static GUID CLSID_WINEAudioConverter = {0x6a170414,0xaad9,0x4693,{0xb8,0x06,0x3a,0x0c,0x47,0xc5,0x70,0xd6}};
+
 static const struct class_object
 {
     const GUID *clsid;
@@ -448,6 +450,7 @@ class_objects[] =
     { &CLSID_CWMADecMediaObject, &wma_decoder_create },
     { &CLSID_CMpeg4sDecMFT, m4s2_decoder_create },
     { &CLSID_CColorConvertDMO, &color_converter_create },
+    { &CLSID_WINEAudioConverter, &audio_converter_create },
 };
 
 HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj)
@@ -495,6 +498,14 @@ const GUID *color_converter_supported_types[] =
     &MFVideoFormat_YUY2,
     &MFVideoFormat_YVYU,
     &MFVideoFormat_YVYU,
+};
+
+static WCHAR audio_converterW[] = {'A','u','d','i','o',' ','C','o','n','v','e','r','t','e','r',0};
+
+const GUID *audio_converter_supported_types[] =
+{
+    &MFAudioFormat_PCM,
+    &MFAudioFormat_Float,
 };
 
 static WCHAR h264decoderW[] = {'H','.','2','6','4',' ','D','e','c','o','d','e','r',0};
@@ -601,6 +612,18 @@ mfts[] =
         color_converter_supported_types,
         ARRAY_SIZE(color_converter_supported_types),
         color_converter_supported_types,
+        NULL
+    },
+    {
+        &CLSID_WINEAudioConverter,
+        &MFT_CATEGORY_AUDIO_EFFECT,
+        audio_converterW,
+        MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Audio,
+        ARRAY_SIZE(audio_converter_supported_types),
+        audio_converter_supported_types,
+        ARRAY_SIZE(audio_converter_supported_types),
+        audio_converter_supported_types,
         NULL
     },
     {
