@@ -11,6 +11,7 @@ C_SRCS = \
 	macos.c \
 	md2.c \
 	sha256.c \
-	sha512.c
+	sha512.c \
+	unixlib.c
 
 RC_SRCS = version.rc
