@@ -7,6 +7,7 @@ EXTRADLLFLAGS = -mno-cygwin
 
 C_SRCS = \
 	bcrypt_main.c \
+	gcrypt.c \
 	gnutls.c \
 	macos.c \
 	md2.c \
