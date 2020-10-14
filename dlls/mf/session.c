@@ -1781,6 +1781,7 @@ static HRESULT WINAPI mfsession_Close(IMFMediaSession *iface)
 static HRESULT WINAPI mfsession_Shutdown(IMFMediaSession *iface)
 {
     struct media_session *session = impl_from_IMFMediaSession(iface);
+    struct media_sink *sink;
     HRESULT hr = S_OK;
 
     FIXME("%p.\n", iface);
@@ -1792,6 +1793,10 @@ static HRESULT WINAPI mfsession_Shutdown(IMFMediaSession *iface)
         IMFMediaEventQueue_Shutdown(session->event_queue);
         if (session->quality_manager)
             IMFQualityManager_Shutdown(session->quality_manager);
+        LIST_FOR_EACH_ENTRY(sink, &session->presentation.sinks, struct media_sink, entry)
+        {
+            IMFMediaSink_Shutdown(sink->sink);
+        }
     }
     LeaveCriticalSection(&session->cs);
 
