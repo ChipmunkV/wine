@@ -2599,11 +2599,12 @@ static void session_deliver_sample_to_node(struct media_session *session, IMFTop
                 LIST_FOR_EACH_ENTRY_SAFE(sample_entry, sample_entry2, &topo_node->u.transform.outputs[i].samples,
                         struct sample, entry)
                 {
-                    if (!topo_node->u.transform.outputs[i].requests)
+                    if (!topo_node->u.transform.outputs[i].requests && sample_entry->sample)
                         break;
 
                     session_deliver_sample_to_node(session, downstream_node, downstream_input, sample_entry->sample);
-                    topo_node->u.transform.outputs[i].requests--;
+                    if (sample_entry->sample)
+                        topo_node->u.transform.outputs[i].requests--;
 
                     transform_release_sample(sample_entry);
                 }
