@@ -552,6 +552,11 @@ static gboolean bytestream_query(GstPad *pad, GstObject *parent, GstQuery *query
             gst_query_add_scheduling_mode(query, GST_PAD_MODE_PULL);
             return TRUE;
         }
+        case GST_QUERY_LATENCY:
+        {
+            gst_query_set_latency(query, FALSE, 0, 0);
+            return TRUE;
+        }
         default:
         {
             WARN("Unhandled query type %s\n", GST_QUERY_TYPE_NAME(query));
@@ -614,6 +619,23 @@ GstBusSyncReply bus_watch(GstBus *bus, GstMessage *message, gpointer user)
             g_error_free(err);
             g_free(dbg_info);
             break;
+        case GST_MESSAGE_TAG:
+        {
+            GstTagList *tag_list;
+            gchar *printable;
+            gst_message_parse_tag(message, &tag_list);
+            if (tag_list)
+            {
+                printable = gst_tag_list_to_string(tag_list);
+                if (printable)
+                {
+                    TRACE("tag test: %s\n", debugstr_a(printable));
+                    g_free(printable);
+                }
+            }
+
+            break;
+        }
         default:
             break;
     }
@@ -1152,7 +1174,7 @@ static HRESULT WINAPI media_source_GetCharacteristics(IMFMediaSource *iface, DWO
     if (source->state == SOURCE_SHUTDOWN)
         return MF_E_SHUTDOWN;
 
-    *characteristics = MFMEDIASOURCE_CAN_SEEK;
+    *characteristics = MFMEDIASOURCE_CAN_SEEK | MFMEDIASOURCE_CAN_PAUSE;
 
     return S_OK;
 }
