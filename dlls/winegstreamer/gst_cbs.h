@@ -194,6 +194,5 @@ gboolean activate_push_mode_wrapper(GstPad *pad, GstObject *parent, GstPadMode m
 gboolean query_input_src_wrapper(GstPad *pad, GstObject *parent, GstQuery *query) DECLSPEC_HIDDEN;
 GstBusSyncReply watch_decoder_bus_wrapper(GstBus *bus, GstMessage *message, gpointer user) DECLSPEC_HIDDEN;
 GstFlowReturn decoder_new_sample_wrapper(GstElement *appsink, gpointer user) DECLSPEC_HIDDEN;
-void decoder_pad_added_wrapper(GstElement *element, GstPad *Pad, gpointer user) DECLSPEC_HIDDEN;
 
 #endif

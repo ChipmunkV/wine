@@ -18,6 +18,9 @@
 
 #include "config.h"
 
+#include <stdio.h>
+#include <assert.h>
+
 #include <gst/gst.h>
 
 #include "objbase.h"
@@ -53,6 +56,12 @@ static void CALLBACK perform_cb(TP_CALLBACK_INSTANCE *instance, void *user)
         perform_cb_media_source(cbdata);
     else if (cbdata->type < MF_DECODE_MAX)
         perform_cb_mf_decode(cbdata);
+    else
+    {
+        fprintf(stderr, "No handler registered for callback\n");
+        assert(0);
+    }
+
 
     pthread_mutex_lock(&cbdata->lock);
     cbdata->finished = 1;
@@ -445,17 +454,6 @@ GstBusSyncReply watch_decoder_bus_wrapper(GstBus *bus, GstMessage *message, gpoi
     call_cb(&cbdata);
 
     return cbdata.u.watch_bus_data.ret;
-}
-
-void decoder_pad_added_wrapper(GstElement *element, GstPad *pad, gpointer user)
-{
-    struct cb_data cbdata = { DECODER_PAD_ADDED };
-
-    cbdata.u.pad_added_data.element = element;
-    cbdata.u.pad_added_data.pad = pad;
-    cbdata.u.pad_added_data.user = user;
-
-    call_cb(&cbdata);
 }
 
 GstFlowReturn decoder_new_sample_wrapper(GstElement *appsink, gpointer user)
