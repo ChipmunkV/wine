@@ -889,14 +889,19 @@ fail:
 
 static HRESULT media_stream_init_desc(struct media_stream *stream)
 {
-    GstCaps *current_caps = gst_pad_get_current_caps(stream->their_src);
+    GstCaps *base_caps = gst_pad_get_current_caps(stream->their_src);
     IMFMediaTypeHandler *type_handler;
     IMFMediaType **stream_types = NULL;
     IMFMediaType *stream_type = NULL;
+    GstCaps *current_caps = make_mf_compatible_caps(base_caps);
     DWORD type_count = 0;
     const gchar *major_type;
     unsigned int i;
     HRESULT hr;
+
+    gst_caps_unref(base_caps);
+    if (!current_caps)
+        return E_FAIL;
 
     major_type = gst_structure_get_name(gst_caps_get_structure(current_caps, 0));
 
