@@ -1046,29 +1046,7 @@ static HRESULT source_reader_get_stream_read_index(struct source_reader *reader,
             {
                 /* Cycle through all selected streams once, next pick first selected. */
                 if (FAILED(hr = source_reader_get_first_selected_stream(reader, STREAM_FLAG_REQUESTED_ONCE, stream_index)))
-                {
-                    //hr = source_reader_get_first_selected_stream(reader, 0, stream_index);
-                    static int last_selection = -1;
-                    int i;
-                    BOOL selected;
-
-                    for (i = 0; i < (int) reader->stream_count; ++i)
-                    {
-                        source_reader_get_stream_selection(reader, i, &selected);
-                        if (selected && i > last_selection)
-                        {
-                            last_selection = i;
-                            *stream_index = i;
-                            hr = S_OK;
-                            break;
-                        }
-                    }
-                    if (i == reader->stream_count)
-                    {
-                        hr = source_reader_get_first_selected_stream(reader, 0, stream_index);
-                        last_selection = hr == S_OK ? *stream_index : -1;
-                    }
-                }
+                    hr = source_reader_get_first_selected_stream(reader, 0, stream_index);
             }
             return hr;
         default:
