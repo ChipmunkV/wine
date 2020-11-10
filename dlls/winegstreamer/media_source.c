@@ -46,10 +46,15 @@ WINE_DEFAULT_DEBUG_CHANNEL(mfplat);
 struct media_stream
 {
     IMFMediaStream IMFMediaStream_iface;
+    IMFAsyncCallback request_queue_callback;
     LONG ref;
     struct media_source *parent_source;
     IMFMediaEventQueue *event_queue;
     IMFStreamDescriptor *descriptor;
+    DWORD request_queue;
+    HANDLE exhaust_event;
+    unsigned int requests_sent;
+    unsigned int requests_served;
     GstElement *appsink;
     GstPad *their_src, *my_sink;
     enum
@@ -115,6 +120,7 @@ struct media_source
         SOURCE_SHUTDOWN,
     } state;
     HANDLE no_more_pads_event;
+    CRITICAL_SECTION eop_cs;
 };
 
 static inline struct media_stream *impl_from_IMFMediaStream(IMFMediaStream *iface)
@@ -145,6 +151,11 @@ static inline struct media_source *impl_from_async_commands_callback_IMFAsyncCal
 static inline struct source_async_command *impl_from_async_command_IUnknown(IUnknown *iface)
 {
     return CONTAINING_RECORD(iface, struct source_async_command, IUnknown_iface);
+}
+
+static inline struct media_stream *impl_from_request_queue_callback_IMFAsyncCallback(IMFAsyncCallback *iface)
+{
+    return CONTAINING_RECORD(iface, struct media_stream, request_queue_callback);
 }
 
 static HRESULT WINAPI source_async_command_QueryInterface(IUnknown *iface, REFIID riid, void **obj)
@@ -263,12 +274,26 @@ static IMFStreamDescriptor *stream_descriptor_from_id(IMFPresentationDescriptor 
     return NULL;
 }
 
+/* only call this from the source queue */
+static void flush_stream_queues(struct media_source *source)
+{
+    unsigned int i = 0;
+
+    for (i = 0; i < source->stream_count; i++)
+    {
+        struct media_stream *stream = source->streams[i];
+        WaitForSingleObject(stream->exhaust_event, INFINITE);
+    }
+}
+
 static void start_pipeline(struct media_source *source, struct source_async_command *command)
 {
     PROPVARIANT *position = &command->u.start.position;
     BOOL seek_message = source->state != SOURCE_STOPPED && position->vt != VT_EMPTY;
     GstStateChangeReturn ret;
     unsigned int i;
+
+    flush_stream_queues(source);
 
     gst_element_set_state(source->container, GST_STATE_PAUSED);
     ret = gst_element_get_state(source->container, NULL, NULL, -1);
@@ -379,14 +404,19 @@ static void dispatch_end_of_presentation(struct media_source *source)
     PROPVARIANT empty = {.vt = VT_EMPTY};
     unsigned int i;
 
+    EnterCriticalSection(&source->eop_cs);
     /* A stream has ended, check whether all have */
     for (i = 0; i < source->stream_count; i++)
     {
         struct media_stream *stream = source->streams[i];
 
         if (stream->state != STREAM_INACTIVE && !stream->eos)
+        {
+            LeaveCriticalSection(&source->eop_cs);
             return;
+        }
     }
+    LeaveCriticalSection(&source->eop_cs);
 
     IMFMediaEventQueue_QueueEventParamVar(source->event_queue, MEEndOfPresentation, &GUID_NULL, S_OK, &empty);
 }
@@ -452,7 +482,14 @@ static HRESULT WINAPI source_async_commands_Invoke(IMFAsyncCallback *iface, IMFA
             stop_pipeline(source);
             break;
         case SOURCE_ASYNC_REQUEST_SAMPLE:
-            wait_on_sample(command->u.request_sample.stream, command->u.request_sample.token);
+        {
+            struct media_stream *stream = command->u.request_sample.stream;
+            ResetEvent(stream->exhaust_event);
+            stream->requests_sent++;
+            hr = MFPutWorkItem(stream->request_queue, &stream->request_queue_callback, command->u.request_sample.token);
+            if (FAILED(hr))
+                ERR("failed to queue sample request.  %#x\n", hr);
+        }
             break;
     }
 
@@ -468,6 +505,48 @@ static const IMFAsyncCallbackVtbl source_async_commands_callback_vtbl =
     source_async_commands_callback_Release,
     callback_GetParameters,
     source_async_commands_Invoke,
+};
+
+static ULONG WINAPI stream_request_queue_callback_AddRef(IMFAsyncCallback *iface)
+{
+    struct media_stream *stream = impl_from_request_queue_callback_IMFAsyncCallback(iface);
+    return IMFMediaStream_AddRef(&stream->IMFMediaStream_iface);
+}
+
+static ULONG WINAPI stream_request_queue_callback_Release(IMFAsyncCallback *iface)
+{
+    struct media_stream *stream = impl_from_request_queue_callback_IMFAsyncCallback(iface);
+    return IMFMediaStream_Release(&stream->IMFMediaStream_iface);
+}
+
+static HRESULT WINAPI stream_request_queue_Invoke(IMFAsyncCallback *iface, IMFAsyncResult *result)
+{
+    struct media_stream *stream = impl_from_request_queue_callback_IMFAsyncCallback(iface);
+    IUnknown *token = NULL;
+
+    if (stream->parent_source->state == SOURCE_SHUTDOWN)
+        return S_OK;
+
+    IMFAsyncResult_GetState(result, &token);
+
+    wait_on_sample(stream, token);
+
+    if (++stream->requests_served == stream->requests_sent)
+        SetEvent(stream->exhaust_event);
+
+    if (token)
+        IUnknown_Release(token);
+
+    return S_OK;
+}
+
+static const IMFAsyncCallbackVtbl stream_request_queue_callback_vtbl =
+{
+    callback_QueryInterface,
+    stream_request_queue_callback_AddRef,
+    stream_request_queue_callback_Release,
+    callback_GetParameters,
+    stream_request_queue_Invoke,
 };
 
 GstFlowReturn bytestream_wrapper_pull(GstPad *pad, GstObject *parent, guint64 ofs, guint len,
@@ -941,6 +1020,7 @@ static HRESULT new_media_stream(struct media_source *source, GstPad *pad, DWORD 
     TRACE("(%p %p)->(%p)\n", source, pad, out_stream);
 
     object->IMFMediaStream_iface.lpVtbl = &media_stream_vtbl;
+    object->request_queue_callback.lpVtbl = &stream_request_queue_callback_vtbl;
     object->ref = 1;
 
     IMFMediaSource_AddRef(&source->IMFMediaSource_iface);
@@ -953,6 +1033,15 @@ static HRESULT new_media_stream(struct media_source *source, GstPad *pad, DWORD 
 
     if (FAILED(hr = MFCreateEventQueue(&object->event_queue)))
         goto fail;
+
+    if (FAILED(hr = MFAllocateWorkQueue(&object->request_queue)))
+        goto fail;
+
+    if (!(object->exhaust_event = CreateEventA(NULL, TRUE, TRUE, NULL)))
+    {
+        hr = E_OUTOFMEMORY;
+        goto fail;
+    }
 
     if (!(object->appsink = gst_element_factory_make("appsink", NULL)))
     {
@@ -1229,6 +1318,9 @@ static HRESULT WINAPI media_source_Stop(IMFMediaSource *iface)
 
     if (source->state == SOURCE_SHUTDOWN)
         return MF_E_SHUTDOWN;
+
+    FIXME("::Stop is untested with per-stream queues (TODO)\n");
+    return E_NOTIMPL;
 
     if (SUCCEEDED(hr = source_create_async_op(SOURCE_ASYNC_STOP, &command)))
         hr = MFPutWorkItem(source->async_commands_queue, &source->async_commands_callback, &command->IUnknown_iface);
@@ -1515,6 +1607,7 @@ static HRESULT media_source_constructor(IMFByteStream *bytestream, struct media_
     object->byte_stream = bytestream;
     IMFByteStream_AddRef(bytestream);
     object->no_more_pads_event = CreateEventA(NULL, FALSE, FALSE, NULL);
+    InitializeCriticalSection(&object->eop_cs);
 
     if (FAILED(hr = MFCreateEventQueue(&object->event_queue)))
         goto fail;
