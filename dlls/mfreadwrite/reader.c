@@ -738,9 +738,9 @@ static HRESULT source_reader_media_stream_state_handler(struct source_reader *re
                         if ((hr = source_reader_pull_stream_samples(reader, stream)) != MF_E_TRANSFORM_NEED_MORE_INPUT)
                             WARN("Failed to pull pending samples, hr %#x.\n", hr);
                     }
-
-                    while (stream->requests)
+                    do
                         source_reader_queue_response(reader, stream, S_OK, MF_SOURCE_READERF_ENDOFSTREAM, 0, NULL);
+                    while (stream->requests);
 
                     break;
                 case MEStreamSeeked:
@@ -958,7 +958,7 @@ static BOOL source_reader_get_read_result(struct source_reader *reader, struct m
     if ((response = media_stream_pop_response(reader, stream)))
     {
         *status = response->status;
-        *stream_index = stream->index;
+        *stream_index = response->stream_index;
         *stream_flags = response->stream_flags;
         *timestamp = response->timestamp;
         *sample = response->sample;
@@ -967,7 +967,7 @@ static BOOL source_reader_get_read_result(struct source_reader *reader, struct m
 
         source_reader_release_response(response);
     }
-    else
+    else if (stream)
     {
         *status = S_OK;
         *stream_index = stream->index;
@@ -983,6 +983,13 @@ static BOOL source_reader_get_read_result(struct source_reader *reader, struct m
             request_sample = !(flags & MF_SOURCE_READER_CONTROLF_DRAIN);
             *stream_flags = 0;
         }
+    }
+    else
+    {
+        ERR("No response found in any stream\n");
+        *status = E_FAIL;
+        *stream_flags = MF_SOURCE_READERF_ERROR;
+        *timestamp = 0;
     }
 
     return !request_sample;
@@ -1044,9 +1051,7 @@ static HRESULT source_reader_get_stream_read_index(struct source_reader *reader,
             }
             else
             {
-                /* Cycle through all selected streams once, next pick first selected. */
-                if (FAILED(hr = source_reader_get_first_selected_stream(reader, STREAM_FLAG_REQUESTED_ONCE, stream_index)))
-                    hr = source_reader_get_first_selected_stream(reader, 0, stream_index);
+                return E_FAIL;
             }
             return hr;
         default:
@@ -1763,6 +1768,7 @@ static HRESULT source_reader_read_sample(struct source_reader *reader, DWORD ind
     LONGLONG timestamp_tmp;
     DWORD stream_index;
     HRESULT hr = S_OK;
+    unsigned int i;
 
     if (!stream_flags || !sample)
         return E_POINTER;
@@ -1802,6 +1808,52 @@ static HRESULT source_reader_read_sample(struct source_reader *reader, DWORD ind
                 if (SUCCEEDED(hr))
                     source_reader_get_read_result(reader, stream, flags, &hr, actual_index, stream_flags,
                        timestamp, sample);
+            }
+        }
+        else if (index == MF_SOURCE_READER_ANY_STREAM)
+        {
+            BOOL any_selected = FALSE, any_not_drained = FALSE;
+
+            for (i = 0; i < reader->stream_count; ++i)
+            {
+                BOOL selected = SUCCEEDED(source_reader_get_stream_selection(reader, i, &selected)) && selected;
+                BOOL stream_drained = reader->streams[i].state == STREAM_STATE_EOS && !reader->streams[i].responses;
+                stream = &reader->streams[i];
+
+                if (selected)
+                {
+                    any_selected = TRUE;
+                    if (!stream_drained)
+                        any_not_drained = TRUE;
+                }
+
+                if (selected && !stream_drained)
+                {
+                    if (source_reader_get_read_result(reader, stream, flags, &hr, actual_index, stream_flags,
+                        timestamp, sample))
+                    {
+                        break;
+                    }
+                    if (!(stream->flags & STREAM_FLAG_SAMPLE_REQUESTED))
+                    {
+                        stream->requests++;
+                        if (FAILED(hr = source_reader_request_sample(reader, stream)))
+                            WARN("Failed to request a sample, hr %#x.\n", hr);
+                    }
+                }
+            }
+
+            if (!any_selected)
+                hr = MF_E_INVALIDREQUEST;
+            else if (!any_not_drained)
+            {
+                if (SUCCEEDED(hr = source_reader_get_first_selected_stream(reader, 0, actual_index)))
+                    source_reader_get_read_result(reader, &reader->streams[*actual_index], flags, &hr, actual_index, stream_flags, timestamp, sample);
+            }
+            else if (i == reader->stream_count)
+            {
+                SleepConditionVariableCS(&reader->sample_event, &reader->cs, INFINITE);
+                source_reader_get_read_result(reader, NULL, flags, &hr, actual_index, stream_flags, timestamp, sample);
             }
         }
         else
