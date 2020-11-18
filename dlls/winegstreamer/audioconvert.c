@@ -21,6 +21,8 @@ struct audio_converter
 {
     IMFTransform IMFTransform_iface;
     LONG refcount;
+    IMFAttributes *attributes;
+    IMFAttributes *output_attributes;
     IMFMediaType *input_type;
     IMFMediaType *output_type;
     CRITICAL_SECTION cs;
@@ -70,6 +72,10 @@ static ULONG WINAPI audio_converter_Release(IMFTransform *iface)
     if (!refcount)
     {
         DeleteCriticalSection(&transform->cs);
+        if (transform->attributes)
+            IMFAttributes_Release(transform->attributes);
+        if (transform->output_attributes)
+            IMFAttributes_Release(transform->output_attributes);
         gst_object_unref(transform->container);
         heap_free(transform);
     }
@@ -141,9 +147,14 @@ static HRESULT WINAPI audio_converter_GetOutputStreamInfo(IMFTransform *iface, D
 
 static HRESULT WINAPI audio_converter_GetAttributes(IMFTransform *iface, IMFAttributes **attributes)
 {
-    FIXME("%p, %p.\n", iface, attributes);
+    struct audio_converter *transform = impl_audio_converter_from_IMFTransform(iface);
 
-    return E_NOTIMPL;
+    TRACE("%p, %p.\n", iface, attributes);
+
+    *attributes = transform->attributes;
+    IMFAttributes_AddRef(*attributes);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI audio_converter_GetInputStreamAttributes(IMFTransform *iface, DWORD id,
@@ -157,9 +168,14 @@ static HRESULT WINAPI audio_converter_GetInputStreamAttributes(IMFTransform *ifa
 static HRESULT WINAPI audio_converter_GetOutputStreamAttributes(IMFTransform *iface, DWORD id,
         IMFAttributes **attributes)
 {
-    FIXME("%p, %u, %p.\n", iface, id, attributes);
+    struct audio_converter *transform = impl_audio_converter_from_IMFTransform(iface);
 
-    return E_NOTIMPL;
+    TRACE("%p, %u, %p.\n", iface, id, attributes);
+
+    *attributes = transform->output_attributes;
+    IMFAttributes_AddRef(*attributes);
+
+    return S_OK;
 }
 
 static HRESULT WINAPI audio_converter_DeleteInputStream(IMFTransform *iface, DWORD id)
@@ -706,6 +722,12 @@ HRESULT audio_converter_create(REFIID riid, void **ret)
     object->refcount = 1;
 
     InitializeCriticalSection(&object->cs);
+
+    if (FAILED(hr = MFCreateAttributes(&object->attributes, 0)))
+        goto failed;
+
+    if (FAILED(hr = MFCreateAttributes(&object->output_attributes, 0)))
+        goto failed;
 
     object->container = gst_bin_new(NULL);
 
