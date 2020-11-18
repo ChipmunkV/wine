@@ -405,6 +405,8 @@ failed:
 
 static const GUID CLSID_GStreamerByteStreamHandler = {0x317df618, 0x5e5a, 0x468a, {0x9f, 0x15, 0xd8, 0x27, 0xa9, 0xa0, 0x81, 0x62}};
 
+static GUID CLSID_WINEAudioConverter = {0x6a170414,0xaad9,0x4693,{0xb8,0x06,0x3a,0x0c,0x47,0xc5,0x70,0xd6}};
+
 static const struct class_object
 {
     const GUID *clsid;
@@ -414,6 +416,7 @@ class_objects[] =
 {
     { &CLSID_VideoProcessorMFT, &video_processor_create },
     { &CLSID_GStreamerByteStreamHandler, &winegstreamer_stream_handler_create },
+    { &CLSID_WINEAudioConverter, &audio_converter_create },
 };
 
 HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj)
@@ -440,6 +443,80 @@ HRESULT mfplat_get_class_object(REFCLSID rclsid, REFIID riid, void **obj)
     }
 
     return CLASS_E_CLASSNOTAVAILABLE;
+}
+
+static WCHAR audio_converterW[] = {'A','u','d','i','o',' ','C','o','n','v','e','r','t','e','r',0};
+const GUID *audio_converter_supported_types[] =
+{
+    &MFAudioFormat_PCM,
+    &MFAudioFormat_Float,
+};
+
+static const struct mft
+{
+    const GUID *clsid;
+    const GUID *category;
+    LPWSTR name;
+    const UINT32 flags;
+    const GUID *major_type;
+    const UINT32 input_types_count;
+    const GUID **input_types;
+    const UINT32 output_types_count;
+    const GUID **output_types;
+    IMFAttributes *attributes;
+}
+mfts[] =
+{
+    {
+        &CLSID_WINEAudioConverter,
+        &MFT_CATEGORY_AUDIO_EFFECT,
+        audio_converterW,
+        MFT_ENUM_FLAG_SYNCMFT,
+        &MFMediaType_Audio,
+        ARRAY_SIZE(audio_converter_supported_types),
+        audio_converter_supported_types,
+        ARRAY_SIZE(audio_converter_supported_types),
+        audio_converter_supported_types,
+        NULL
+    },
+};
+
+HRESULT mfplat_DllRegisterServer(void)
+{
+    unsigned int i;
+    HRESULT hr;
+
+    for (i = 0; i < ARRAY_SIZE(mfts); i++)
+    {
+        const struct mft *cur = &mfts[i];
+
+        MFT_REGISTER_TYPE_INFO *input_types, *output_types;
+        input_types = heap_alloc(cur->input_types_count * sizeof(input_types[0]));
+        output_types = heap_alloc(cur->output_types_count * sizeof(output_types[0]));
+        for (i = 0; i < cur->input_types_count; i++)
+        {
+            input_types[i].guidMajorType = *(cur->major_type);
+            input_types[i].guidSubtype = *(cur->input_types[i]);
+        }
+        for (i = 0; i < cur->output_types_count; i++)
+        {
+            output_types[i].guidMajorType = *(cur->major_type);
+            output_types[i].guidSubtype = *(cur->output_types[i]);
+        }
+
+        hr = MFTRegister(*(cur->clsid), *(cur->category), cur->name, cur->flags, cur->input_types_count,
+                    input_types, cur->output_types_count, output_types, cur->attributes);
+
+        heap_free(input_types);
+        heap_free(output_types);
+
+        if (FAILED(hr))
+        {
+            FIXME("Failed to register MFT, hr %#x\n", hr);
+            return hr;
+        }
+    }
+    return S_OK;
 }
 
 static const struct
